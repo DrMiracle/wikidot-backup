@@ -1,0 +1,69 @@
+# Python
+
+**pycache**/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+
+.venv/
+venv/
+env/
+
+# Packaging
+
+build/
+dist/
+*.egg-info/
+
+# Test / coverage
+
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Type checking / linting
+
+.mypy_cache/
+.ruff_cache/
+
+# IDEs
+
+.idea/
+.vscode/
+
+# Environment / secrets
+
+.env
+.env.*
+!.env.example
+
+# Backup output
+
+backup/
+backups/
+archive/
+output/
+
+# Runtime state
+
+*.log
+state/
+cache/
+
+# OS
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+
+*.tmp
+*.temp
+*.bak
+~*
+src/temp/
+pages.txt
+listpages_debug.html
