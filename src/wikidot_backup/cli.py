@@ -7,6 +7,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
+from wikidot_backup.config import DEFAULT_OUTPUT_DIR
 from wikidot_backup.services.backup import backup_site
 from wikidot_backup.ui.progress import RichBackupProgress
 from wikidot_backup.wikidot.client import WikidotClient
@@ -39,7 +40,7 @@ def backup(
             "-o",
             help="Backup archive directory.",
         ),
-    ] = Path("backup"),
+    ] = Path(DEFAULT_OUTPUT_DIR),
     limit: Annotated[
         int | None,
         typer.Option(

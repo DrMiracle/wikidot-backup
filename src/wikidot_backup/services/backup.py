@@ -6,6 +6,7 @@ from pathlib import Path
 from wikidot_backup.collectors.pages import collect_page
 from wikidot_backup.services.backup_types import BackupProgressReporter, SiteBackupResult
 from wikidot_backup.storage.archive import ArchiveWriter
+from wikidot_backup.storage.indexes import rebuild_page_indexes
 from wikidot_backup.storage.state import BackupState
 from wikidot_backup.wikidot.client import WikidotClient
 
@@ -52,6 +53,9 @@ def backup_site(
 
     writer = ArchiveWriter(output)
     state = BackupState(output)
+
+    if progress is not None:
+        progress.discovery_started()
 
     # Enumeration must succeed completely before any page collection begins.
     # Otherwise a partial page list could be mistaken for a full-site backup.
@@ -144,6 +148,10 @@ def backup_site(
                 saved=saved,
                 failed=failed,
             )
+
+    # Indexes are derived from all page records currently present in the archive,
+    # including pages completed during earlier resumed runs.
+    rebuild_page_indexes(output)
 
     resume_state_cleared = False
 

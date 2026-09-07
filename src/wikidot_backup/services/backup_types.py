@@ -30,6 +30,10 @@ class BackupProgressReporter(Protocol):
         """Initialize progress reporting for a backup run."""
         ...
 
+    def discovery_started(self) -> None:
+        """Report that Wikidot page discovery has started."""
+        ...
+
     def page_started(
             self,
             *,

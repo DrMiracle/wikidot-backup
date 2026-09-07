@@ -6,6 +6,7 @@ import secrets
 from typing import Any
 
 import httpx
+from wikidot_backup.wikidot.retry import retry_wikidot_request
 
 
 class WikidotAmcClient:
@@ -26,6 +27,7 @@ class WikidotAmcClient:
             follow_redirects=True,
         )
 
+    @retry_wikidot_request
     def request(
         self,
         module_name: str,
@@ -34,6 +36,9 @@ class WikidotAmcClient:
         **params: Any,
     ) -> dict[str, Any]:
         """Execute a Wikidot AJAX module request.
+
+        Transient transport failures, rate limiting and server-side HTTP
+        failures are retried automatically using exponential backoff.
 
         Args:
             module_name:
@@ -51,9 +56,6 @@ class WikidotAmcClient:
             Decoded Wikidot JSON response.
 
         Raises:
-            httpx.HTTPError:
-                If the HTTP request fails.
-
             RuntimeError:
                 If Wikidot returns a non-OK module response.
         """

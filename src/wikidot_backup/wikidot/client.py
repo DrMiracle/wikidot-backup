@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 from wikidot_backup.config import LIST_PAGES_PER_PAGE
 from wikidot_backup.wikidot.amc import WikidotAmcClient
 from wikidot_backup.wikidot.models import WikidotPageData, WikidotUserData
+from wikidot_backup.wikidot.retry import retry_wikidot_request
 
 
 class WikidotClient:
@@ -35,8 +36,10 @@ class WikidotClient:
             self._site.url,
         )
 
+    @retry_wikidot_request
     def fetch_page(self, fullname: str) -> WikidotPageData:
         """Retrieve and normalize current data for one Wikidot page.
+        Transient communication failures are retried automatically.
 
         Third-party ``wikidot.py`` objects are converted into primitive values
         before leaving the integration layer. This prevents the rest of the
@@ -137,12 +140,6 @@ class WikidotClient:
                 for fullname in batch
                 if fullname not in seen
             ]
-
-            print(
-                f"ListPages offset {offset}: "
-                f"{len(batch)} returned, "
-                f"{len(new_fullnames)} new"
-            )
 
             if not batch:
                 break

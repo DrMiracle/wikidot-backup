@@ -72,6 +72,12 @@ class RichBackupProgress:
 
         self._progress.stop()
 
+    def discovery_started(self) -> None:
+        """Report that Wikidot page discovery has started."""
+        self._progress.console.print(
+            "[cyan]Fetching page list...[/cyan]"
+        )
+
     def begin(
         self,
         *,
