@@ -29,7 +29,7 @@ class WikidotPageData:
     fullname: str
     name: str
     category: str
-    title: str
+    title: str | None
 
     parent_fullname: str | None
 

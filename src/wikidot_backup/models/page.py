@@ -38,7 +38,7 @@ class PageRecord(BaseModel):
     fullname: str
     name: str
     category: str
-    title: str
+    title: str | None = None
 
     parent_fullname: str | None = None
 
