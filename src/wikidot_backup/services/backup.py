@@ -4,10 +4,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from wikidot_backup.collectors.pages import collect_page
-from wikidot_backup.services.backup_types import BackupProgressReporter, SiteBackupResult
+from wikidot_backup.services.backup_types import (
+    BackupProgressReporter,
+    SiteBackupResult,
+    BackupOptions,
+    BackupComponent
+)
 from wikidot_backup.storage.archive import ArchiveWriter
 from wikidot_backup.storage.indexes import rebuild_page_indexes
-from wikidot_backup.storage.state import BackupState
+from wikidot_backup.storage.state import BackupState, PageBackupState
 from wikidot_backup.wikidot.client import WikidotClient
 
 
@@ -15,6 +20,7 @@ def backup_site(
         client: WikidotClient,
         output: Path,
         *,
+        options: BackupOptions,
         limit: int | None = None,
         progress: BackupProgressReporter | None = None,
 ) -> SiteBackupResult:
@@ -34,9 +40,15 @@ def backup_site(
         output:
             Root directory of the filesystem archive.
 
+        options:
+            Components to include in the backup. Current page metadata and
+            source are always included; optional components such as revision
+            history are included according to these settings.
+
         limit:
-            Optional maximum number of unfinished pages to process during
-            this invocation. Primarily useful during development.
+            Maximum number of pages to process during this invocation.
+            ``None`` processes all pages that are incomplete for the
+            requested backup components.
 
         progress:
             Optional progress reporter. The collector itself is independent
@@ -60,15 +72,18 @@ def backup_site(
     # Enumeration must succeed completely before any page collection begins.
     # Otherwise a partial page list could be mistaken for a full-site backup.
     fullnames = client.list_page_fullnames()
-
     discovered_count = len(fullnames)
 
-    completed = state.load_completed_pages()
+    page_states = state.load_page_states()
+    required_components = options.required_components
 
     pending_all = [
         fullname
         for fullname in fullnames
-        if fullname not in completed
+        if not _is_page_complete(
+            page_states.get(fullname),
+            required_components,
+        )
     ]
 
     already_completed_count = (
@@ -103,23 +118,47 @@ def backup_site(
                 fullname=fullname,
             )
 
+        page_state = page_states.setdefault(
+            fullname,
+            PageBackupState(),
+        )
+
         try:
-            page, source = collect_page(
-                client,
-                fullname,
-            )
+            if BackupComponent.PAGE not in page_state.completed_components:
+                page, source = collect_page(
+                    client,
+                    fullname,
+                )
 
-            writer.save_page(
-                page,
-                source,
-            )
+                writer.save_page(
+                    page,
+                    source,
+                )
 
-            # Mark the page completed only after all archive files have
-            # been written successfully.
-            state.record_completed(
-                fullname=page.fullname,
-                page_id=page.page_id,
-            )
+                # Mark the page completed only after all archive files have
+                # been written successfully.
+                state.record_component_completed(
+                    fullname=page.fullname,
+                    page_id=page.page_id,
+                    component=BackupComponent.PAGE,
+                )
+
+                page_state.page_id = page.page_id
+                page_state.completed_components.add(
+                    BackupComponent.PAGE
+                )
+
+                # TODO: implement revisions later
+                # revisions = collect_page_revisions(
+                #     client,
+                #     page_id=page.page_id,
+                #     fullname=page.fullname,
+                # )
+                #
+                # writer.save_page_revisions(
+                #     page.page_id,
+                #     revisions,
+                # )
 
         except Exception as exc:
             failed += 1
@@ -156,7 +195,7 @@ def backup_site(
     resume_state_cleared = False
 
     if not limited_run and failed == 0:
-        state.clear_completed_pages()
+        state.clear_resume_state()
         resume_state_cleared = True
 
     if progress is not None:
@@ -173,4 +212,17 @@ def backup_site(
         failed=failed,
         limited=limited_run,
         resume_state_cleared=resume_state_cleared,
+    )
+
+
+def _is_page_complete(
+    page_state: PageBackupState | None,
+    required_components: frozenset[BackupComponent],
+) -> bool:
+    """Return whether all requested components are already complete."""
+    if page_state is None:
+        return False
+
+    return required_components.issubset(
+        page_state.completed_components
     )

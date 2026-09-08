@@ -1,4 +1,5 @@
-from wikidot_backup.models.page import PageRecord, SourceRef
+from wikidot_backup.models.common import SourceRef
+from wikidot_backup.models.page import PageRecord
 
 
 def test_page_record_allows_missing_title() -> None:
@@ -14,6 +15,7 @@ def test_page_record_allows_missing_title() -> None:
         comments_count=0,
         size=0,
         source=SourceRef(
+            path="test_path",
             sha256="0" * 64,
             characters=0,
         ),

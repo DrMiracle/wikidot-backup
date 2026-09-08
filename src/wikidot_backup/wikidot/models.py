@@ -1,5 +1,6 @@
 """Normalized data structures returned by the Wikidot integration layer."""
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 
@@ -61,3 +62,20 @@ class WikidotPageData:
     metas: dict[str, str]
 
     source: str
+
+@dataclass(slots=True)
+class WikidotPageRevisionData:
+    """Transient metadata for one page revision retrieved from Wikidot.
+
+    This model contains normalized revision information from Wikidot,
+    before archive-specific processing such as hashing and source-file
+    references is applied.
+    """
+
+    revision_id: int
+    revision_no: int
+
+    created_by: WikidotUserData | None
+    created_at: datetime | None
+
+    comment: str | None

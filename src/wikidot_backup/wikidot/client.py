@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 
 from wikidot_backup.config import LIST_PAGES_PER_PAGE
 from wikidot_backup.wikidot.amc import WikidotAmcClient
-from wikidot_backup.wikidot.models import WikidotPageData, WikidotUserData
+from wikidot_backup.wikidot.models import WikidotPageData, WikidotUserData, WikidotPageRevisionData
 from wikidot_backup.wikidot.retry import retry_wikidot_request
 
 
@@ -95,13 +95,13 @@ class WikidotClient:
 
             latest_revision_no=page.revisions_count,
 
-            created_by=self._user_to_dataclass(page.created_by),
+            created_by=self._normalize_user(page.created_by),
             created_at=page.created_at,
 
-            updated_by=self._user_to_dataclass(page.updated_by),
+            updated_by=self._normalize_user(page.updated_by),
             updated_at=page.updated_at,
 
-            commented_by=self._user_to_dataclass(page.commented_by),
+            commented_by=self._normalize_user(page.commented_by),
             commented_at=page.commented_at,
 
             discussion_thread_id=(
@@ -113,6 +113,64 @@ class WikidotClient:
             metas=dict(page.metas),
 
             source=source,
+        )
+
+    @retry_wikidot_request
+    def fetch_page_revisions(
+            self,
+            fullname: str,
+    ) -> list[WikidotPageRevisionData]:
+        """Retrieve normalized revision metadata for a Wikidot page.
+
+        Args:
+            fullname:
+                Canonical Wikidot page fullname.
+
+        Returns:
+            Revision metadata in the order returned by Wikidot.
+
+        Raises:
+            LookupError:
+                If Wikidot does not return the requested page.
+        """
+        page = self._site.page.get(fullname)
+
+        if page is None:
+            raise LookupError(
+                f"Wikidot page not found: {fullname}"
+            )
+
+        return [
+            WikidotPageRevisionData(
+                revision_id=revision.id,
+                revision_no=revision.rev_no,
+                created_by=self._normalize_user(revision.created_by),
+                created_at=revision.created_at,
+                comment=revision.comment,
+            )
+            for revision in page.revisions
+        ]
+
+    def fetch_revision_source(
+            self,
+            revision_id: int,
+    ) -> str:
+        """Retrieve Wikidot source for one historical page revision.
+
+        Args:
+            revision_id:
+                Stable numeric Wikidot revision identifier.
+
+        Returns:
+            Decoded Wikidot source text for the requested revision.
+        """
+        result = self._amc.request(
+            "history/PageSourceModule",
+            revision_id=str(revision_id),
+        )
+
+        return self._parse_revision_source_response(
+            result["body"]
         )
 
     def list_page_fullnames(self) -> list[str]:
@@ -161,6 +219,11 @@ class WikidotClient:
             offset += LIST_PAGES_PER_PAGE
 
         return fullnames
+
+    def close(self) -> None:
+        """Release HTTP resources owned by the Wikidot integration layer."""
+
+        self._amc.close()
 
     def _list_page_fullnames_batch(
             self,
@@ -239,10 +302,45 @@ class WikidotClient:
             if line.strip()
         ]
 
-    def close(self) -> None:
-        """Release HTTP resources owned by the Wikidot integration layer."""
+    @staticmethod
+    def _parse_revision_source_response(body: str) -> str:
+        """Extract Wikidot source from a PageSourceModule response.
 
-        self._amc.close()
+        Wikidot represents original source line breaks with HTML ``<br>``
+        elements. These are converted back to newline characters while escaped
+        source markup is decoded as text.
+
+        Args:
+            body:
+                HTML fragment returned by PageSourceModule.
+
+        Returns:
+            Decoded Wikidot source text.
+
+        Raises:
+            RuntimeError:
+                If the expected source container cannot be found.
+        """
+        soup = BeautifulSoup(body, "html.parser")
+
+        container = (
+                soup.select_one(".page-source")
+                or soup.find("div")
+        )
+
+        if container is None:
+            raise RuntimeError(
+                "Could not find revision source in "
+                "PageSourceModule response."
+            )
+
+        # PageSourceModule represents source line breaks as <br> elements.
+        # Replacing them explicitly avoids treating unrelated HTML formatting
+        # whitespace as part of the Wikidot source.
+        for line_break in container.find_all("br"):
+            line_break.replace_with("\n")
+
+        return container.get_text()
 
     @staticmethod
     def _split_tags(
@@ -269,7 +367,7 @@ class WikidotClient:
         return visible, hidden
 
     @staticmethod
-    def _user_to_dataclass(user: Any | None) -> WikidotUserData | None:
+    def _normalize_user(user: Any | None) -> WikidotUserData | None:
         """Convert a wikidot.py user object into persistent dataclass.
 
         Wikidot system, deleted or special users may not have a numeric ID,
@@ -288,9 +386,5 @@ class WikidotClient:
         return WikidotUserData(
             id=user.id,
             name=user.name,
-            unix_name=getattr(
-                user,
-                "unix_name",
-                None,
-            ),
+            unix_name=user.unix_name,
         )

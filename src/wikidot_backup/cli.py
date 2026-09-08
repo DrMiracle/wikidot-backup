@@ -9,6 +9,7 @@ from rich.console import Console
 
 from wikidot_backup.config import DEFAULT_OUTPUT_DIR
 from wikidot_backup.services.backup import backup_site
+from wikidot_backup.services.backup_types import BackupOptions
 from wikidot_backup.ui.progress import RichBackupProgress
 from wikidot_backup.wikidot.client import WikidotClient
 
@@ -52,6 +53,21 @@ def backup(
             ),
         ),
     ] = None,
+    revisions: Annotated[
+        bool,
+        typer.Option(
+            "--revisions",
+            help="Include complete page revision history.",
+        ),
+    ] = False,
+
+    files: Annotated[
+        bool,
+        typer.Option(
+            "--files/--no-files",
+            help="Download page attachments.",
+        ),
+    ] = True,
 ) -> None:
     """Back up current page content from a Wikidot site.
 
@@ -69,6 +85,10 @@ def backup(
             result = backup_site(
                 client,
                 output,
+                options=BackupOptions(
+                    include_revisions=revisions,
+                    include_files=files,
+                ),
                 limit=limit,
                 progress=progress,
             )

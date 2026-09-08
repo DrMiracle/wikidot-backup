@@ -1,7 +1,35 @@
 """Types defining the public contract of backup services."""
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
 
+
+class BackupComponent(StrEnum):
+    """Independently trackable component of an archived Wikidot page."""
+
+    PAGE = "page"
+    REVISIONS = "revisions"
+
+@dataclass(frozen=True, slots=True)
+class BackupOptions:
+    """Components requested for a site backup."""
+
+    include_revisions: bool = False
+    include_files: bool = True
+
+    @property
+    def required_components(self) -> frozenset[BackupComponent]:
+        """Return components that must be completed for this backup."""
+        components = {
+            BackupComponent.PAGE,
+        }
+
+        if self.include_revisions:
+            components.add(
+                BackupComponent.REVISIONS
+            )
+
+        return frozenset(components)
 
 @dataclass(frozen=True, slots=True)
 class SiteBackupResult:

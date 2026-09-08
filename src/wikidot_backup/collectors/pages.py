@@ -1,11 +1,12 @@
 """Collectors for individual Wikidot pages."""
 from __future__ import annotations
 
-from wikidot_backup.models.common import UserRef
-from wikidot_backup.models.page import PageRecord, SourceRef
+from wikidot_backup.collectors.common import user_to_ref
+from wikidot_backup.config import SOURCE_FILENAME
+from wikidot_backup.models.common import SourceRef
+from wikidot_backup.models.page import PageRecord
 from wikidot_backup.util.hashing import sha256_text
 from wikidot_backup.wikidot.client import WikidotClient
-from wikidot_backup.wikidot.models import WikidotUserData
 
 
 def collect_page(
@@ -65,13 +66,13 @@ def collect_page(
 
         latest_revision_no=data.latest_revision_no,
 
-        created_by=_to_user_ref(data.created_by),
+        created_by=user_to_ref(data.created_by),
         created_at=data.created_at,
 
-        updated_by=_to_user_ref(data.updated_by),
+        updated_by=user_to_ref(data.updated_by),
         updated_at=data.updated_at,
 
-        commented_by=_to_user_ref(data.commented_by),
+        commented_by=user_to_ref(data.commented_by),
         commented_at=data.commented_at,
 
         discussion_thread_id=data.discussion_thread_id,
@@ -81,23 +82,10 @@ def collect_page(
         # format, encoding and path use the archive-wide defaults
         # defined by SourceRef/config.py.
         source=SourceRef(
+            path=SOURCE_FILENAME,
             sha256=source_hash,
             characters=len(data.source),
         ),
     )
 
     return page, data.source
-
-def _to_user_ref(
-    user: WikidotUserData | None,
-) -> UserRef | None:
-    """Convert integration-layer user data into archive user metadata."""
-
-    if user is None:
-        return None
-
-    return UserRef(
-        id=user.id,
-        name=user.name,
-        unix_name=user.unix_name,
-    )

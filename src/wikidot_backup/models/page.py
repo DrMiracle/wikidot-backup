@@ -6,18 +6,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from wikidot_backup.config import SOURCE_FORMAT, TEXT_ENCODING, SOURCE_FILENAME
-from wikidot_backup.models.common import UserRef
-
-
-class SourceRef(BaseModel):
-    """Reference to the raw Wikidot source stored in the archive."""
-
-    format: str = SOURCE_FORMAT
-    encoding: str = TEXT_ENCODING
-    path: str = SOURCE_FILENAME
-    
-    sha256: str
-    characters: int
+from wikidot_backup.models.common import UserRef, SourceRef
 
 
 class PageRecord(BaseModel):
