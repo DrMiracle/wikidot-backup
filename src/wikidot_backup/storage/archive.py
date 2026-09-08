@@ -68,9 +68,7 @@ class ArchiveWriter:
     def save_page_revisions(
             self,
             page_id: int,
-            revisions: Iterable[
-                tuple[PageRevisionRecord, str]
-            ],
+            revisions: Iterable[tuple[PageRevisionRecord, str]],
     ) -> int:
         """Write complete revision history for one archived page.
 
@@ -88,9 +86,8 @@ class ArchiveWriter:
         """
         page_dir = self.root / "pages" / str(page_id)
         revisions_dir = page_dir / "revisions"
-        sources_dir = revisions_dir / "sources"
 
-        sources_dir.mkdir(
+        revisions_dir.mkdir(
             parents=True,
             exist_ok=True,
         )

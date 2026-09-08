@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from wikidot_backup.collectors.pages import collect_page
+from wikidot_backup.collectors.revisions import collect_page_revisions
 from wikidot_backup.services.backup_types import (
     BackupProgressReporter,
     SiteBackupResult,
@@ -147,18 +148,33 @@ def backup_site(
                 page_state.completed_components.add(
                     BackupComponent.PAGE
                 )
+            if options.include_revisions and BackupComponent.REVISIONS not in page_state.completed_components:
+                if page_state.page_id is None:
+                    raise RuntimeError(
+                        f"Cannot archive revisions for {fullname!r}: "
+                        "page ID is unavailable."
+                    )
 
-                # TODO: implement revisions later
-                # revisions = collect_page_revisions(
-                #     client,
-                #     page_id=page.page_id,
-                #     fullname=page.fullname,
-                # )
-                #
-                # writer.save_page_revisions(
-                #     page.page_id,
-                #     revisions,
-                # )
+                revisions = collect_page_revisions(
+                    client,
+                    page_id=page_state.page_id,
+                    fullname=fullname,
+                )
+
+                writer.save_page_revisions(
+                    page_state.page_id,
+                    revisions,
+                )
+
+                state.record_component_completed(
+                    fullname=fullname,
+                    page_id=page_state.page_id,
+                    component=BackupComponent.REVISIONS,
+                )
+
+                page_state.completed_components.add(
+                    BackupComponent.REVISIONS
+                )
 
         except Exception as exc:
             failed += 1
@@ -193,7 +209,7 @@ def backup_site(
     rebuild_page_indexes(output)
 
     resume_state_cleared = False
-
+    # TODO: implement archive state as a source of truth so that we don't fetch already completed page
     if not limited_run and failed == 0:
         state.clear_resume_state()
         resume_state_cleared = True

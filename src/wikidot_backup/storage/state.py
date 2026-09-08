@@ -44,7 +44,7 @@ class BackupState:
         self.state_dir = archive_root / ".state"
 
         self.completed_path = (
-                self.state_dir / "completed_pages.jsonl"
+                self.state_dir / "completed_components.jsonl"
         )
 
         self.errors_path = (

@@ -9,6 +9,8 @@ from wikidot_backup.config import LIST_PAGES_PER_PAGE
 from wikidot_backup.wikidot.amc import WikidotAmcClient
 from wikidot_backup.wikidot.models import WikidotPageData, WikidotUserData, WikidotPageRevisionData
 from wikidot_backup.wikidot.retry import retry_wikidot_request
+from wikidot_backup.wikidot.source import parse_current_source_response, parse_revision_source_response
+
 
 
 class WikidotClient:
@@ -65,7 +67,7 @@ class WikidotClient:
             raise LookupError(f"Wikidot page not found: {fullname}")
 
         page_id = page.id
-        source = page.source.wiki_text
+        source = self.fetch_current_source(page_id)
 
         visible_tags, hidden_tags = self._split_tags(page.tags)
 
@@ -113,6 +115,31 @@ class WikidotClient:
             metas=dict(page.metas),
 
             source=source,
+        )
+
+    def fetch_current_source(
+            self,
+            page_id: int,
+    ) -> str:
+        """Retrieve canonical Wikidot source for the current page version.
+
+        Current source is retrieved directly through Wikidot's source module
+        and parsed by the same pipeline used for historical revision sources.
+
+        Args:
+            page_id:
+                Stable numeric Wikidot page identifier.
+
+        Returns:
+            Canonical decoded Wikidot source text.
+        """
+        result = self._amc.request(
+            "viewsource/ViewSourceModule",
+            page_id=str(page_id),
+        )
+
+        return parse_current_source_response(
+            result["body"]
         )
 
     @retry_wikidot_request
@@ -169,7 +196,7 @@ class WikidotClient:
             revision_id=str(revision_id),
         )
 
-        return self._parse_revision_source_response(
+        return parse_current_source_response(
             result["body"]
         )
 
@@ -301,46 +328,6 @@ class WikidotClient:
             for line in container.get_text(separator="\n").splitlines()
             if line.strip()
         ]
-
-    @staticmethod
-    def _parse_revision_source_response(body: str) -> str:
-        """Extract Wikidot source from a PageSourceModule response.
-
-        Wikidot represents original source line breaks with HTML ``<br>``
-        elements. These are converted back to newline characters while escaped
-        source markup is decoded as text.
-
-        Args:
-            body:
-                HTML fragment returned by PageSourceModule.
-
-        Returns:
-            Decoded Wikidot source text.
-
-        Raises:
-            RuntimeError:
-                If the expected source container cannot be found.
-        """
-        soup = BeautifulSoup(body, "html.parser")
-
-        container = (
-                soup.select_one(".page-source")
-                or soup.find("div")
-        )
-
-        if container is None:
-            raise RuntimeError(
-                "Could not find revision source in "
-                "PageSourceModule response."
-            )
-
-        # PageSourceModule represents source line breaks as <br> elements.
-        # Replacing them explicitly avoids treating unrelated HTML formatting
-        # whitespace as part of the Wikidot source.
-        for line_break in container.find_all("br"):
-            line_break.replace_with("\n")
-
-        return container.get_text()
 
     @staticmethod
     def _split_tags(
