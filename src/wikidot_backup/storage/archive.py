@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from wikidot_backup.config import TEXT_ENCODING, TEXT_NEWLINE, SOURCE_FILENAME
+from wikidot_backup.models.file import PageFileRecord, PageFilesRecord
 from wikidot_backup.models.page import PageRecord
 from wikidot_backup.models.revision import PageRevisionRecord
 
@@ -123,5 +124,74 @@ class ArchiveWriter:
                     )
                 )
                 file.write(TEXT_NEWLINE)
+
+        return len(records)
+
+    def save_page_files(
+            self,
+            page_id: int,
+            files: Iterable[
+                tuple[PageFileRecord, bytes]
+            ],
+    ) -> int:
+        """Persist page attachment metadata and original binary contents.
+
+        Binary data is stored by SHA-256 digest, allowing identical attachment
+        content to be shared safely across multiple page records.
+
+        Args:
+            page_id:
+                Stable Wikidot page identifier.
+            files:
+                Attachment metadata/content pairs.
+
+        Returns:
+            Number of attachment records written.
+        """
+        page_dir = (
+                self.root
+                / "pages"
+                / str(page_id)
+        )
+        page_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        records: list[PageFileRecord] = []
+
+        for record, content in files:
+            blob_path = (
+                    self.root / record.content.path
+            )
+
+            blob_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            # Content-addressed blobs are immutable. If the same checksum is
+            # already present, the existing binary data can be reused.
+            # Verifying integrity can be improved in the future by comparing sha256.
+            if not blob_path.exists():
+                blob_path.write_bytes(content)
+
+            records.append(record)
+
+        metadata = PageFilesRecord(
+            page_id=page_id,
+            files=records,
+        )
+
+        metadata_path = page_dir / "files.json"
+
+        metadata_path.write_text(
+            metadata.model_dump_json(
+                indent=2,
+                exclude_none=False,
+            ),
+            encoding=TEXT_ENCODING,
+            newline=TEXT_NEWLINE,
+        )
 
         return len(records)

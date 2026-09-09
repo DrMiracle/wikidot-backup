@@ -27,3 +27,10 @@ class SourceRef(BaseModel):
 
     sha256: str
     characters: int
+
+class BlobRef(BaseModel):
+    """Reference to immutable binary content stored in the archive."""
+
+    path: str
+    sha256: str
+    size: int

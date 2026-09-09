@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from wikidot_backup.collectors.files import collect_page_files
 from wikidot_backup.collectors.pages import collect_page
 from wikidot_backup.collectors.revisions import collect_page_revisions
 from wikidot_backup.services.backup_types import (
@@ -148,6 +149,35 @@ def backup_site(
                 page_state.completed_components.add(
                     BackupComponent.PAGE
                 )
+
+            if options.include_files and BackupComponent.FILES not in page_state.completed_components:
+                if page_state.page_id is None:
+                    raise RuntimeError(
+                        f"Cannot archive files for {fullname!r}: "
+                        "page ID is unavailable."
+                    )
+
+                files = collect_page_files(
+                    client,
+                    page_id=page_state.page_id,
+                    fullname=fullname,
+                )
+
+                writer.save_page_files(
+                    page_state.page_id,
+                    files,
+                )
+
+                state.record_component_completed(
+                    fullname=fullname,
+                    page_id=page_state.page_id,
+                    component=BackupComponent.FILES,
+                )
+
+                page_state.completed_components.add(
+                    BackupComponent.FILES
+                )
+
             if options.include_revisions and BackupComponent.REVISIONS not in page_state.completed_components:
                 if page_state.page_id is None:
                     raise RuntimeError(

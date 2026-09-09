@@ -9,6 +9,7 @@ class BackupComponent(StrEnum):
 
     PAGE = "page"
     REVISIONS = "revisions"
+    FILES = "files"
 
 @dataclass(frozen=True, slots=True)
 class BackupOptions:
@@ -27,6 +28,11 @@ class BackupOptions:
         if self.include_revisions:
             components.add(
                 BackupComponent.REVISIONS
+            )
+
+        if self.include_files:
+            components.add(
+                BackupComponent.FILES
             )
 
         return frozenset(components)

@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import wikidot
 from bs4 import BeautifulSoup
 
 from wikidot_backup.config import LIST_PAGES_PER_PAGE
 from wikidot_backup.wikidot.amc import WikidotAmcClient
-from wikidot_backup.wikidot.models import WikidotPageData, WikidotUserData, WikidotPageRevisionData
+from wikidot_backup.wikidot.models import WikidotPageData, WikidotUserData, WikidotPageRevisionData, WikidotFileData
 from wikidot_backup.wikidot.retry import retry_wikidot_request
-from wikidot_backup.wikidot.source import parse_current_source_response, parse_revision_source_response
-
+from wikidot_backup.wikidot.source import parse_current_source_response
 
 
 class WikidotClient:
@@ -36,6 +36,12 @@ class WikidotClient:
 
         self._amc = WikidotAmcClient(
             self._site.url,
+        )
+
+        # To GET files through HTTP
+        self._http = httpx.Client(
+            timeout=30.0,
+            follow_redirects=True,
         )
 
     @retry_wikidot_request
@@ -247,10 +253,70 @@ class WikidotClient:
 
         return fullnames
 
+    @retry_wikidot_request
+    def fetch_page_files(
+            self,
+            fullname: str,
+    ) -> list[WikidotFileData]:
+        """Retrieve normalized attachment metadata for a Wikidot page.
+
+        Args:
+            fullname:
+                Canonical Wikidot page fullname.
+
+        Returns:
+            Metadata for all attachments currently associated with the page.
+
+        Raises:
+            LookupError:
+                If Wikidot does not return the requested page.
+        """
+        page = self._site.page.get(fullname)
+
+        if page is None:
+            raise LookupError(
+                f"Wikidot page not found: {fullname}"
+            )
+
+        return [
+            WikidotFileData(
+                file_id=file.id,
+                name=file.name,
+                url=file.url,
+                mime_type=file.mime_type,
+                size=(
+                    int(file.size)
+                    if file.size is not None
+                    else None
+                ),
+            )
+            for file in page.files
+        ]
+
+    @retry_wikidot_request
+    def fetch_file_content(
+            self,
+            url: str,
+    ) -> bytes:
+        """Download original attachment bytes from Wikidot.
+
+        Args:
+            url:
+                Direct attachment URL returned by Wikidot.
+
+        Returns:
+            Original binary response body.
+        """
+        response = self._http.get(url)
+        response.raise_for_status()
+
+        return response.content
+
     def close(self) -> None:
         """Release HTTP resources owned by the Wikidot integration layer."""
 
         self._amc.close()
+        self._http.close()
 
     def _list_page_fullnames_batch(
             self,

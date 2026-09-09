@@ -79,3 +79,14 @@ class WikidotPageRevisionData:
     created_at: datetime | None
 
     comment: str | None
+
+@dataclass(slots=True)
+class WikidotFileData:
+    """Transient normalized metadata for a Wikidot page attachment."""
+
+    file_id: int
+    name: str
+    url: str
+
+    mime_type: str | None
+    size: int | None
