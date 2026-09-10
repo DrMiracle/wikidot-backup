@@ -16,7 +16,9 @@ disaster recovery or migration to another wiki engine.
 - content-addressed attachment storage with SHA-256 integrity hashes;
 - resumable component-aware backup runs;
 - retry/backoff for transient Wikidot failures;
-- JSON and CSV page indexes for easier navigation.
+- JSON and CSV page indexes for easier navigation;
+- root archive metadata (`archive.json`) with site identity and backup timestamps;
+- archive inspection with page, revision, attachment, error, and disk usage statistics.
 
 Forums, page discussions, external resources, and locally derived link data
 are not yet archived.
@@ -97,6 +99,29 @@ wikidot-backup --help
 wikidot-backup backup --help
 ```
 
+### Inspecting an archive
+
+Show information about an existing backup:
+
+```bash
+wikidot-backup info ./backup
+```
+
+The command reports:
+
+- archived pages and current page sources;
+- pages with attachment metadata and total attachment records;
+- unique stored attachment blobs;
+- pages with revision history and total revision records;
+- archive disk usage by data category;
+- backup creation and completion timestamps;
+- resumable/incomplete run state;
+- recorded backup errors.
+
+Archive content is inspected directly from the filesystem, so these counts
+describe what is actually stored in the backup rather than the current state
+of the Wikidot site.
+
 ## Archive layout
 
 Pages are stored by their stable numeric Wikidot page ID. Human-readable
@@ -104,6 +129,8 @@ page names and titles are preserved in metadata and navigation indexes.
 
 ```text
 backup/
+├── archive.json
+│
 ├── pages/
 │   └── <page_id>/
 │       ├── page.json
@@ -244,6 +271,7 @@ src/
     ├── models/
     │   ├── common.py
     │   ├── file.py
+    │   ├── manifest.py
     │   ├── page.py
     │   └── revision.py
     │
@@ -260,12 +288,15 @@ src/
     ├── storage/
     │   ├── archive.py
     │   ├── indexes.py
+    │   ├── inspection.py
+    │   ├── manifest.py
     │   └── state.py
     │
     ├── ui/
     │   └── progress.py
     │
     └── util/
+        ├── formatting.py
         └── hashing.py
 ```
 
@@ -273,11 +304,11 @@ The main responsibilities are:
 
 - `wikidot/` — communication with Wikidot and normalization of remote data;
 - `collectors/` — conversion of Wikidot data into persistent archive records;
-- `models/` — schemas of data stored in the archive;
+- `models/` — schemas for data stored in the archive;
 - `services/` — backup workflow orchestration;
-- `storage/` — archive writing, indexes, and resume state;
+- `storage/` — archive writing, manifest handling, indexes, inspection, and resume state;
 - `ui/` — terminal progress reporting;
-- `util/` — small shared utilities such as hashing.
+- `util/` — small shared utilities such as hashing and output formatting.
 
 ## Reliability
 
