@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from wikidot_backup.config import TEXT_ENCODING, TEXT_NEWLINE, SOURCE_FILENAME
+from wikidot_backup.models.common import BlobRef
 from wikidot_backup.models.file import PageFileRecord, PageFilesRecord
 from wikidot_backup.models.page import PageRecord
 from wikidot_backup.models.revision import PageRevisionRecord
@@ -161,20 +162,10 @@ class ArchiveWriter:
         records: list[PageFileRecord] = []
 
         for record, content in files:
-            blob_path = (
-                    self.root / record.content.path
+            self.save_blob(
+                record.content,
+                content,
             )
-
-            blob_path.parent.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
-
-            # Content-addressed blobs are immutable. If the same checksum is
-            # already present, the existing binary data can be reused.
-            # Verifying integrity can be improved in the future by comparing sha256.
-            if not blob_path.exists():
-                blob_path.write_bytes(content)
 
             records.append(record)
 
@@ -185,13 +176,66 @@ class ArchiveWriter:
 
         metadata_path = page_dir / "files.json"
 
-        metadata_path.write_text(
-            metadata.model_dump_json(
-                indent=2,
-                exclude_none=False,
-            ),
-            encoding=TEXT_ENCODING,
-            newline=TEXT_NEWLINE,
+        temporary_path = metadata_path.with_suffix(
+            ".json.tmp"
         )
 
+        # So that files.json is atomic - either full completion or no completion.
+        try:
+            temporary_path.write_text(
+                metadata.model_dump_json(
+                    indent=2,
+                    exclude_none=False,
+                )
+                + TEXT_NEWLINE,
+                encoding=TEXT_ENCODING,
+                newline=TEXT_NEWLINE,
+            )
+
+            temporary_path.replace(
+                metadata_path
+            )
+        finally:
+            temporary_path.unlink(
+                missing_ok=True
+            )
+
         return len(records)
+
+    def save_blob(
+            self,
+            blob: BlobRef,
+            content: bytes,
+    ) -> None:
+        """Persist immutable binary content atomically.
+
+        Existing content-addressed blobs are reused instead of being written
+        again. New blobs become visible at their canonical path only after the
+        complete write succeeds.
+        """
+        if len(content) != blob.size:
+            raise ValueError(
+                "Blob size does not match supplied content."
+            )
+
+        path = self.root / blob.path
+
+        if path.is_file():
+            return
+
+        path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        temporary_path = path.with_name(
+            f"{path.name}.tmp"
+        )
+
+        try:
+            temporary_path.write_bytes(content)
+            temporary_path.replace(path)
+        finally:
+            temporary_path.unlink(
+                missing_ok=True
+            )

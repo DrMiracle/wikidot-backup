@@ -6,11 +6,15 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from wikidot_backup.config import DEFAULT_OUTPUT_DIR
 from wikidot_backup.services.backup import backup_site
 from wikidot_backup.services.backup_types import BackupOptions
+from wikidot_backup.storage.inspection import inspect_archive
+from wikidot_backup.storage.manifest import ArchiveManifestStore
 from wikidot_backup.ui.progress import RichBackupProgress
+from wikidot_backup.util.formatting import format_bytes
 from wikidot_backup.wikidot.client import WikidotClient
 
 
@@ -132,3 +136,136 @@ def backup(
     console.print(
         f"Saved this run: {result.saved}"
     )
+
+@app.command()
+def info(
+    archive: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to an existing backup archive.",
+        ),
+    ],
+) -> None:
+    """Show information about an existing backup archive."""
+    statistics = inspect_archive(archive)
+
+    manifest_path = archive / "archive.json"
+
+    manifest = (
+        ArchiveManifestStore(archive).load()
+        if manifest_path.is_file()
+        else None
+    )
+
+    table = Table(
+        title="Wikidot Backup",
+        show_header=False,
+    )
+
+    table.add_column("Field")
+    table.add_column("Value")
+
+    if manifest is not None:
+        table.add_row(
+            "Site",
+            manifest.site.unix_name,
+        )
+        table.add_row(
+            "Title",
+            manifest.site.title or "-",
+        )
+        table.add_row(
+            "Created",
+            manifest.created_at.isoformat(),
+        )
+        table.add_row(
+            "Last successful run",
+            (
+                manifest.last_successful_run_at.isoformat()
+                if manifest.last_successful_run_at
+                else "-"
+            ),
+        )
+        table.add_row(
+            "Last full backup",
+            (
+                manifest.last_full_backup_at.isoformat()
+                if manifest.last_full_backup_at
+                else "-"
+            ),
+        )
+
+        table.add_section()
+
+    table.add_row(
+        "Archived pages",
+        str(statistics.pages),
+    )
+    table.add_row(
+        "Current sources",
+        str(statistics.current_sources),
+    )
+    table.add_row(
+        "Pages with file metadata",
+        str(statistics.pages_with_file_metadata),
+    )
+    table.add_row(
+        "Attachment records",
+        str(statistics.file_records),
+    )
+    table.add_row(
+        "Unique blobs",
+        str(statistics.unique_blobs),
+    )
+    table.add_row(
+        "Pages with revisions",
+        str(statistics.pages_with_revisions),
+    )
+    table.add_row(
+        "Revisions",
+        str(statistics.revisions),
+    )
+
+    table.add_section()
+
+    table.add_row(
+        "Page data",
+        format_bytes(statistics.pages_bytes),
+    )
+    table.add_row(
+        "Blobs",
+        format_bytes(statistics.blobs_bytes),
+    )
+    table.add_row(
+        "Indexes",
+        format_bytes(statistics.indexes_bytes),
+    )
+    table.add_row(
+        "State",
+        format_bytes(statistics.state_bytes),
+    )
+    table.add_row(
+        "Total",
+        format_bytes(statistics.total_bytes),
+    )
+
+    table.add_section()
+
+    table.add_row(
+        "Incomplete run state",
+        (
+            "present"
+            if statistics.resume_present
+            else "none"
+        ),
+    )
+    table.add_row(
+        "Pages in resume state",
+        str(statistics.resume_pages),
+    )
+    table.add_row(
+        "Error records",
+        str(statistics.error_records),
+    )
+
+    console.print(table)

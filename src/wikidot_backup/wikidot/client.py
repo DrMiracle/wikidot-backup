@@ -8,9 +8,11 @@ from bs4 import BeautifulSoup
 
 from wikidot_backup.config import LIST_PAGES_PER_PAGE
 from wikidot_backup.wikidot.amc import WikidotAmcClient
-from wikidot_backup.wikidot.models import WikidotPageData, WikidotUserData, WikidotPageRevisionData, WikidotFileData
+from wikidot_backup.wikidot.models import WikidotPageData, WikidotUserData, WikidotPageRevisionData, WikidotFileData, \
+    WikidotSiteData
 from wikidot_backup.wikidot.retry import retry_wikidot_request
-from wikidot_backup.wikidot.source import parse_current_source_response
+from wikidot_backup.wikidot.source import parse_current_source_response, parse_revision_source_response
+
 
 
 class WikidotClient:
@@ -440,4 +442,15 @@ class WikidotClient:
             id=user.id,
             name=user.name,
             unix_name=user.unix_name,
+        )
+
+    @property
+    def site_data(self) -> WikidotSiteData:
+        """Return normalized identity information for the connected site."""
+        return WikidotSiteData(
+            id=self._site.id,
+            unix_name=self._site.unix_name,
+            title=self._site.title,
+            domain=self._site.domain,
+            url=self._site.url,
         )

@@ -1,7 +1,7 @@
 """Persistent models for archived Wikidot attachments."""
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from wikidot_backup.models.common import BlobRef
 
@@ -23,7 +23,8 @@ class PageFileRecord(BaseModel):
     # independently in BlobRef and may therefore be verified.
     wikidot_size: int | None = None
 
-    content: BlobRef
+    content: BlobRef | None = None
+    retrieval_error: str | None = None
 
 
 class PageFilesRecord(BaseModel):
@@ -32,4 +33,6 @@ class PageFilesRecord(BaseModel):
     schema_version: int = 1
 
     page_id: int
-    files: list[PageFileRecord]
+    files: list[PageFileRecord] = Field(
+        default_factory=list
+    )

@@ -90,3 +90,13 @@ class WikidotFileData:
 
     mime_type: str | None
     size: int | None
+
+@dataclass(frozen=True, slots=True)
+class WikidotSiteData:
+    """Normalized Wikidot site identity."""
+
+    id: int
+    unix_name: str
+    title: str | None
+    domain: str
+    url: str

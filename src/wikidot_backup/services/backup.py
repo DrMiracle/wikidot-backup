@@ -16,6 +16,8 @@ from wikidot_backup.storage.archive import ArchiveWriter
 from wikidot_backup.storage.indexes import rebuild_page_indexes
 from wikidot_backup.storage.state import BackupState, PageBackupState
 from wikidot_backup.wikidot.client import WikidotClient
+from wikidot_backup.models.manifest import ArchiveSite
+from wikidot_backup.storage.manifest import ArchiveManifestStore
 
 
 def backup_site(
@@ -67,6 +69,19 @@ def backup_site(
 
     writer = ArchiveWriter(output)
     state = BackupState(output)
+    manifest_store = ArchiveManifestStore(output)
+
+    site = client.site_data
+
+    manifest_store.ensure_archive(
+        ArchiveSite(
+            id=site.id,
+            unix_name=site.unix_name,
+            title=site.title,
+            domain=site.domain,
+            url=site.url,
+        )
+    )
 
     if progress is not None:
         progress.discovery_started()
@@ -240,9 +255,19 @@ def backup_site(
 
     resume_state_cleared = False
     # TODO: implement archive state as a source of truth so that we don't fetch already completed page
-    if not limited_run and failed == 0:
-        state.clear_resume_state()
-        resume_state_cleared = True
+    if failed == 0:
+        manifest_store.record_success(
+            components=[
+                component.value
+                for component
+                in options.required_components
+            ],
+            full_backup=not limited_run,
+        )
+
+        if not limited_run:
+            state.clear_resume_state()
+            resume_state_cleared = True
 
     if progress is not None:
         progress.end(

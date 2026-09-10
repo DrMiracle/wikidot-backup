@@ -152,7 +152,7 @@ class RichBackupProgress:
         # console.print integrates with the live progress display without
         # corrupting the progress bar output.
         self._progress.console.print(
-            f"[red]Failed:[/red] {fullname} "
+            f"[red]Failed page:[/red] {fullname} "
             f"({type(exception).__name__}: {exception})"
         )
 
