@@ -11,6 +11,7 @@ from rich.table import Table
 from wikidot_backup.config import DEFAULT_OUTPUT_DIR
 from wikidot_backup.services.backup import backup_site
 from wikidot_backup.services.backup_types import BackupOptions
+from wikidot_backup.services.estimate import estimate_backup
 from wikidot_backup.storage.inspection import inspect_archive
 from wikidot_backup.storage.manifest import ArchiveManifestStore
 from wikidot_backup.ui.progress import RichBackupProgress
@@ -269,3 +270,129 @@ def info(
     )
 
     console.print(table)
+
+@app.command()
+def estimate(
+    site: Annotated[
+        str,
+        typer.Argument(
+            help="Wikidot site unix name.",
+        ),
+    ],
+    revisions: Annotated[
+        bool,
+        typer.Option(
+            "--revisions",
+            help="Include revision history in the estimate.",
+        ),
+    ] = False,
+    files: Annotated[
+        bool,
+        typer.Option(
+            "--files/--no-files",
+            help="Include page attachments in the estimate.",
+        ),
+    ] = True,
+    limit: Annotated[
+        int | None,
+        typer.Option(
+            "--limit",
+            min=1,
+            help="Inspect at most this many pages.",
+        ),
+    ] = None,
+) -> None:
+    """Estimate the approximate size of a prospective backup."""
+    client = WikidotClient(site)
+
+    try:
+        options = BackupOptions(
+            include_revisions=revisions,
+            include_files=files,
+        )
+
+        console.print(
+            "[dim]Estimating backup size...[/dim]"
+        )
+
+        result = estimate_backup(
+            client,
+            options=options,
+            limit=limit,
+        )
+
+    finally:
+        client.close()
+
+    table = Table(
+        title="Estimated Backup Size",
+        show_header=False,
+    )
+
+    table.add_column("Field")
+    table.add_column("Value")
+
+    table.add_row(
+        "Pages inspected",
+        f"{result.pages:,}",
+    )
+    table.add_row(
+        "Current source",
+        format_bytes(
+            result.current_source_bytes
+        ),
+    )
+
+    if files:
+        table.add_section()
+        table.add_row(
+            "Attachments",
+            f"{result.attachment_records:,}",
+        )
+        table.add_row(
+            "Reported attachment size",
+            format_bytes(
+                result.attachment_reported_bytes
+            ),
+        )
+        table.add_row(
+            "Unknown attachment sizes",
+            str(
+                result.attachments_with_unknown_size
+            ),
+        )
+
+    if revisions:
+        table.add_section()
+        table.add_row(
+            "Revision versions",
+            f"{result.revision_records:,}",
+        )
+        table.add_row(
+            "Estimated revision source",
+            "~"
+            + format_bytes(
+                result.revision_source_estimated_bytes
+            ),
+        )
+
+    table.add_section()
+    table.add_row(
+        "Estimated content total",
+        "~"
+        + format_bytes(
+            result.estimated_total_bytes
+        ),
+    )
+
+    console.print(table)
+
+    console.print(
+        "\n[dim]"
+        "Attachment sizes are reported by Wikidot and may differ "
+        "from downloaded sizes. Revision source size is estimated "
+        "from each page's current source size. Metadata, indexes, "
+        "filesystem overhead, forums, and external assets are not "
+        "included."
+        "[/dim]"
+    )

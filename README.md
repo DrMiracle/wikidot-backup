@@ -99,6 +99,19 @@ wikidot-backup --help
 wikidot-backup backup --help
 ```
 
+### Estimating an archive's size
+
+Estimate approximate size of the archive (can take a while, since we're doing full crawl through every page):
+
+```bash
+wikidot-backup estimate scp-ukrainian
+```
+
+Has options:
+
+- `--revisions` - include every page revision;
+- `--no-files` - exclude files.
+
 ### Inspecting an archive
 
 Show information about an existing backup:
