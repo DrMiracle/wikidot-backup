@@ -6,18 +6,20 @@ from pathlib import Path
 from wikidot_backup.collectors.files import collect_page_files
 from wikidot_backup.collectors.pages import collect_page
 from wikidot_backup.collectors.revisions import collect_page_revisions
+from wikidot_backup.models.manifest import ArchiveSite
 from wikidot_backup.services.backup_types import (
+    BackupComponent,
+    BackupOptions,
     BackupProgressReporter,
     SiteBackupResult,
-    BackupOptions,
-    BackupComponent
 )
 from wikidot_backup.storage.archive import ArchiveWriter
+from wikidot_backup.storage.atomic import recover_archive_writes
 from wikidot_backup.storage.indexes import rebuild_page_indexes
+from wikidot_backup.storage.manifest import ArchiveManifestStore
 from wikidot_backup.storage.state import BackupState, PageBackupState
 from wikidot_backup.wikidot.client import WikidotClient
-from wikidot_backup.models.manifest import ArchiveSite
-from wikidot_backup.storage.manifest import ArchiveManifestStore
+from wikidot_backup.wikidot.errors import PAGE_COLLECTION_ERRORS, WikidotResourceError
 
 
 def backup_site(
@@ -67,6 +69,8 @@ def backup_site(
         incomplete backup.
     """
 
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be at least 1")
     writer = ArchiveWriter(output)
     state = BackupState(output)
     manifest_store = ArchiveManifestStore(output)
@@ -82,6 +86,7 @@ def backup_site(
             url=site.url,
         )
     )
+    recover_archive_writes(output)
 
     if progress is not None:
         progress.discovery_started()
@@ -93,6 +98,13 @@ def backup_site(
 
     page_states = state.load_page_states()
     required_components = options.required_components
+
+    # A reused fullname must not hide a replacement page behind completed state.
+    for fullname in fullnames:
+        completed = page_states.get(fullname)
+        if _is_page_complete(completed, required_components):
+            assert completed is not None and completed.page_id is not None
+            client.validate_page_identity(fullname, completed.page_id)
 
     pending_all = [
         fullname
@@ -112,9 +124,8 @@ def backup_site(
     else:
         pending = pending_all[:limit]
 
-    # A supplied limit does not necessarily mean the run is incomplete.
-    # For example, limit=20 with only 8 pending pages still finishes the site.
-    limited_run = len(pending) < len(pending_all)
+    # Only an explicitly unlimited run finalizes the resumable crawl.
+    limited_run = limit is not None
 
     state.start_run()
 
@@ -141,11 +152,17 @@ def backup_site(
         )
 
         try:
+            if page_state.page_id is not None:
+                client.validate_page_identity(fullname, page_state.page_id)
             if BackupComponent.PAGE not in page_state.completed_components:
                 page, source = collect_page(
                     client,
                     fullname,
                 )
+                if page.fullname != fullname or (
+                    page_state.page_id is not None and page_state.page_id != page.page_id
+                ):
+                    raise WikidotResourceError(f"Wikidot page identity changed: {fullname}")
 
                 writer.save_page(
                     page,
@@ -165,7 +182,10 @@ def backup_site(
                     BackupComponent.PAGE
                 )
 
-            if options.include_files and BackupComponent.FILES not in page_state.completed_components:
+            if (
+                options.include_files
+                and BackupComponent.FILES not in page_state.completed_components
+            ):
                 if page_state.page_id is None:
                     raise RuntimeError(
                         f"Cannot archive files for {fullname!r}: "
@@ -193,7 +213,10 @@ def backup_site(
                     BackupComponent.FILES
                 )
 
-            if options.include_revisions and BackupComponent.REVISIONS not in page_state.completed_components:
+            if (
+                options.include_revisions
+                and BackupComponent.REVISIONS not in page_state.completed_components
+            ):
                 if page_state.page_id is None:
                     raise RuntimeError(
                         f"Cannot archive revisions for {fullname!r}: "
@@ -221,7 +244,7 @@ def backup_site(
                     BackupComponent.REVISIONS
                 )
 
-        except Exception as exc:
+        except PAGE_COLLECTION_ERRORS as exc:
             failed += 1
 
             state.record_error(
@@ -254,7 +277,6 @@ def backup_site(
     rebuild_page_indexes(output)
 
     resume_state_cleared = False
-    # TODO: implement archive state as a source of truth so that we don't fetch already completed page
     if failed == 0:
         manifest_store.record_success(
             components=[

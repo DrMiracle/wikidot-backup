@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -11,6 +12,7 @@ from wikidot_backup.config import (
     TEXT_NEWLINE,
 )
 from wikidot_backup.models.page import PageRecord
+from wikidot_backup.storage.atomic import atomic_write, require_settled_archive
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +40,7 @@ def rebuild_page_indexes(root: Path) -> int:
     Returns:
         Number of archived pages included in the generated indexes.
     """
+    require_settled_archive(root)
     pages_dir = root / "pages"
     indexes_dir = root / "indexes"
 
@@ -107,14 +110,12 @@ def _write_json_index(
         ],
     }
 
-    path.write_text(
+    atomic_write(path,
         json.dumps(
             data,
             ensure_ascii=False,
             indent=2,
-        ),
-        encoding=TEXT_ENCODING,
-        newline=TEXT_NEWLINE,
+        ).encode(TEXT_ENCODING),
     )
 
 
@@ -124,11 +125,7 @@ def _write_csv_index(
 ) -> None:
     """Write the human-readable page index."""
 
-    with path.open(
-        "w",
-        encoding=TEXT_ENCODING,
-        newline="",
-    ) as file:
+    with io.StringIO(newline="") as file:
         writer = csv.DictWriter(
             file,
             fieldnames=[
@@ -147,3 +144,4 @@ def _write_csv_index(
             writer.writerow(
                 asdict(entry)
             )
+        atomic_write(path, file.getvalue().encode(TEXT_ENCODING))

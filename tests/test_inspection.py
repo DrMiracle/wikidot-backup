@@ -1,200 +1,149 @@
-"""Tests for archive filesystem inspection."""
-
-from __future__ import annotations
+"""Inspect real persistent records, including malformed archive/state inputs."""
 
 import json
-from pathlib import Path
-from types import SimpleNamespace
 
-import wikidot_backup.storage.inspection as inspection
+import pytest
+
+from wikidot_backup.collectors.pages import collect_page
+from wikidot_backup.models.common import SourceRef
+from wikidot_backup.models.revision import PageRevisionRecord
+from wikidot_backup.services.backup_types import BackupComponent
+from wikidot_backup.storage.archive import ArchiveWriter
+from wikidot_backup.storage.inspection import inspect_archive
+from wikidot_backup.storage.state import BackupState, load_page_states
+from wikidot_backup.util.hashing import sha256_text
 
 
-def test_inspect_archive_counts_stored_data(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    """Inspection should report data physically present in the archive."""
-    page_dir = tmp_path / "pages" / "123"
-    page_dir.mkdir(
-        parents=True
-    )
-
-    (page_dir / "page.json").write_text(
-        "{}",
-        encoding="utf-8",
-    )
-
-    (page_dir / "source.txt").write_text(
-        "page source",
-        encoding="utf-8",
-    )
-
-    (page_dir / "files.json").write_text(
-        "{}",
-        encoding="utf-8",
-    )
-
-    revisions_dir = (
-        page_dir / "revisions"
-    )
-    revisions_dir.mkdir()
-
-    (
-        revisions_dir / "revisions.jsonl"
-    ).write_text(
-        '{"revision_no": 0}\n'
-        '{"revision_no": 1}\n',
-        encoding="utf-8",
-    )
-
-    blobs_dir = (
-        tmp_path / "blobs" / "sha256"
-    )
-    blobs_dir.mkdir(
-        parents=True
-    )
-
-    (blobs_dir / "abc").write_bytes(
-        b"first"
-    )
-    (blobs_dir / "def").write_bytes(
-        b"second"
-    )
-
-    state_dir = tmp_path / ".state"
-    state_dir.mkdir()
-
-    # One page can have several completed component records, but should
-    # count only once as a page represented in resume state.
-    (
-        state_dir / "resume.jsonl"
-    ).write_text(
-        "\n".join(
-            [
-                json.dumps(
-                    {
-                        "fullname": "test-page",
-                        "component": "page",
-                    }
+def test_inspect_archive_counts_stored_data(tmp_path, client):
+    writer = ArchiveWriter(tmp_path)
+    writer.save_page(*collect_page(client, "test-page"))
+    writer.save_page_files(123, [])
+    source = "old source"
+    writer.save_page_revisions(
+        123,
+        [
+            (
+                PageRevisionRecord(
+                    page_id=123,
+                    revision_id=1,
+                    revision_no=0,
+                    source=SourceRef(
+                        path="revisions/sources/1.txt",
+                        sha256=sha256_text(source),
+                        characters=len(source),
+                    ),
                 ),
-                json.dumps(
-                    {
-                        "fullname": "test-page",
-                        "component": "files",
-                    }
-                ),
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    (
-        state_dir / "errors.jsonl"
-    ).write_text(
-        '{"fullname": "broken"}\n',
-        encoding="utf-8",
-    )
-
-    class FakePageRecord:
-        """Minimal page model used by the inspection test."""
-
-        @staticmethod
-        def model_validate_json(_data: str):
-            return SimpleNamespace(
-                source=SimpleNamespace(
-                    path="source.txt"
-                )
+                source,
             )
-
-    class FakePageFilesRecord:
-        """Minimal attachment collection used by the inspection test."""
-
-        @staticmethod
-        def model_validate_json(_data: str):
-            return SimpleNamespace(
-                files=[
-                    object(),
-                    object(),
-                    object(),
-                ]
-            )
-
-    monkeypatch.setattr(
-        inspection,
-        "PageRecord",
-        FakePageRecord,
+        ],
     )
-    monkeypatch.setattr(
-        inspection,
-        "PageFilesRecord",
-        FakePageFilesRecord,
-    )
-
-    result = inspection.inspect_archive(
-        tmp_path
-    )
-
-    assert result.pages == 1
-    assert result.current_sources == 1
-
-    assert result.pages_with_file_metadata == 1
-    assert result.file_records == 3
-    assert result.unique_blobs == 2
-
-    assert result.pages_with_revisions == 1
-    assert result.revisions == 2
-
-    assert result.resume_present is True
-    assert result.resume_pages == 1
+    state = BackupState(tmp_path)
+    state.start_run()
+    for component in (BackupComponent.PAGE, BackupComponent.FILES):
+        state.record_component_completed(fullname="test-page", page_id=123, component=component)
+    state.record_error(fullname="broken", exception=RuntimeError("offline"))
+    result = inspect_archive(tmp_path)
+    assert result.pages == result.current_sources == 1
+    assert result.pages_with_file_metadata == 1 and result.file_records == 0
+    assert result.pages_with_revisions == result.revisions == 1
+    assert result.resume_present and result.resume_pages == 1
     assert result.error_records == 1
+    assert result.total_bytes == sum(p.stat().st_size for p in tmp_path.rglob("*") if p.is_file())
 
-    assert result.total_bytes > 0
 
-def test_inspect_archive_handles_missing_optional_data(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    """Missing optional components should be reported as zero."""
-    page_dir = tmp_path / "pages" / "123"
-    page_dir.mkdir(
-        parents=True
-    )
-
-    (page_dir / "page.json").write_text(
-        "{}",
-        encoding="utf-8",
-    )
-
-    class FakePageRecord:
-        @staticmethod
-        def model_validate_json(_data: str):
-            return SimpleNamespace(
-                source=SimpleNamespace(
-                    path="source.txt"
-                )
-            )
-
-    monkeypatch.setattr(
-        inspection,
-        "PageRecord",
-        FakePageRecord,
-    )
-
-    result = inspection.inspect_archive(
-        tmp_path
-    )
-
+def test_missing_optional_content_is_zero(tmp_path, client):
+    ArchiveWriter(tmp_path).save_page(*collect_page(client, "test-page"))
+    result = inspect_archive(tmp_path)
     assert result.pages == 1
-    assert result.current_sources == 0
+    assert result.file_records == result.unique_blobs == result.revisions == 0
+    assert not result.resume_present
 
-    assert result.pages_with_file_metadata == 0
-    assert result.file_records == 0
-    assert result.unique_blobs == 0
 
-    assert result.pages_with_revisions == 0
-    assert result.revisions == 0
+@pytest.mark.parametrize("filename", ["page.json", "files.json", "revisions/revisions.jsonl"])
+def test_invalid_metadata_is_rejected(tmp_path, client, filename):
+    ArchiveWriter(tmp_path).save_page(*collect_page(client, "test-page"))
+    path = tmp_path / "pages/123" / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Invalid"):
+        inspect_archive(tmp_path)
 
-    assert result.resume_present is False
-    assert result.resume_pages == 0
-    assert result.error_records == 0
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        [],
+        {},
+        {"fullname": "test", "page_id": True},
+        {"fullname": "test", "page_id": 123, "component": "unknown"},
+        {"fullname": "test", "page_id": 123, "component": None},
+        {"fullname": "", "page_id": 123},
+    ],
+)
+def test_backup_and_inspection_share_strict_resume_validation(tmp_path, record):
+    path = tmp_path / ".state/resume.jsonl"
+    path.parent.mkdir()
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    for operation in (
+        lambda: BackupState(tmp_path).load_page_states(),
+        lambda: inspect_archive(tmp_path),
+    ):
+        with pytest.raises(RuntimeError, match="Invalid"):
+            operation()
+
+
+def test_legacy_state_is_supported_and_conflicts_rejected(tmp_path):
+    path = tmp_path / "resume.jsonl"
+    path.write_text('{"fullname":"test","page_id":123}\n', encoding="utf-8")
+    assert load_page_states(path)["test"].completed_components == {BackupComponent.PAGE}
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write('{"fullname":"test","page_id":456,"component":"files"}\n')
+    with pytest.raises(RuntimeError, match="Conflicting page IDs"):
+        load_page_states(path)
+
+
+def test_inspection_counts_attachment_records_and_unique_blobs(tmp_path, client):
+    from wikidot_backup.collectors.files import collect_page_files
+    from wikidot_backup.wikidot.models import WikidotFileData
+
+    writer = ArchiveWriter(tmp_path)
+    writer.save_page(*collect_page(client, "test-page"))
+    client.fetch_page_files.return_value = [
+        WikidotFileData(i, f"file-{i}", f"https://example.test/{i}", None, None) for i in range(3)
+    ]
+    client.fetch_file_content.side_effect = [b"first", b"second", b"first"]
+    writer.save_page_files(123, collect_page_files(client, page_id=123, fullname="test-page"))
+    info = inspect_archive(tmp_path)
+    assert info.file_records == 3
+    assert info.unique_blobs == 2
+    (tmp_path / "blobs/sha256/.interrupted.tmp").write_bytes(b"partial")
+    assert inspect_archive(tmp_path).unique_blobs == 2
+
+
+@pytest.mark.parametrize("filename", ["page.json", "files.json", "revisions/revisions.jsonl"])
+def test_future_schema_versions_are_rejected(tmp_path, client, filename):
+    writer = ArchiveWriter(tmp_path)
+    writer.save_page(*collect_page(client, "test-page"))
+    writer.save_page_files(123, [])
+    writer.save_page_revisions(
+        123,
+        [
+            (
+                PageRevisionRecord(
+                    page_id=123,
+                    revision_id=1,
+                    revision_no=0,
+                    source=SourceRef(
+                        path="revisions/sources/1.txt", sha256=sha256_text("old"), characters=3
+                    ),
+                ),
+                "old",
+            )
+        ],
+    )
+    path = tmp_path / "pages/123" / filename
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["schema_version"] = 2
+    path.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Invalid"):
+        inspect_archive(tmp_path)

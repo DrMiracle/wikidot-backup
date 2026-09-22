@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from wikidot_backup.config import TEXT_ENCODING, SOURCE_FORMAT
+from wikidot_backup.config import SOURCE_FORMAT, TEXT_ENCODING
 
 
 class UserRef(BaseModel):

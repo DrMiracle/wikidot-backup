@@ -18,7 +18,6 @@ from wikidot_backup.ui.progress import RichBackupProgress
 from wikidot_backup.util.formatting import format_bytes
 from wikidot_backup.wikidot.client import WikidotClient
 
-
 app = typer.Typer(
     no_args_is_help=True,
     help="Create portable backups of Wikidot sites.",
@@ -107,7 +106,7 @@ def backup(
 
         raise typer.Exit(
             code=130,
-        )
+        ) from None
 
     finally:
         if client is not None:
@@ -126,7 +125,7 @@ def backup(
     elif result.limited:
         console.print(
             "[green]Current batch completed successfully.[/green] "
-            "More pages remain for the next run."
+            "Resume state retained; run without --limit to finalize the backup."
         )
     else:
         console.print(
@@ -137,6 +136,8 @@ def backup(
     console.print(
         f"Saved this run: {result.saved}"
     )
+    if result.failed:
+        raise typer.Exit(code=1)
 
 @app.command()
 def info(
@@ -365,6 +366,10 @@ def estimate(
     if revisions:
         table.add_section()
         table.add_row(
+            "Pages with unknown revision count",
+            str(result.pages_with_unknown_revision_count),
+        )
+        table.add_row(
             "Revision versions",
             f"{result.revision_records:,}",
         )
@@ -392,6 +397,7 @@ def estimate(
         "Attachment sizes are reported by Wikidot and may differ "
         "from downloaded sizes. Revision source size is estimated "
         "from each page's current source size. Metadata, indexes, "
+        "unknown attachment sizes and unknown revision counts, "
         "filesystem overhead, forums, and external assets are not "
         "included."
         "[/dim]"

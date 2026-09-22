@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -19,8 +20,8 @@ class ArchiveSite(BaseModel):
 class ArchiveManifest(BaseModel):
     """Root metadata for a Wikidot backup archive."""
 
-    schema_version: int = 1
-    archive_format: str = "scp-wikidot-backup"
+    schema_version: Literal[1] = 1
+    archive_format: Literal["scp-wikidot-backup"] = "scp-wikidot-backup"
 
     site: ArchiveSite
 

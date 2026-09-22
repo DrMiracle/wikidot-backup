@@ -2,6 +2,7 @@
 import httpx
 import pytest
 from tenacity import wait_none
+from wikidot.common.exceptions import AMCHttpStatusCodeException
 
 from wikidot_backup.config import WIKIDOT_RETRY_ATTEMPTS
 from wikidot_backup.wikidot.retry import (
@@ -51,6 +52,7 @@ def test_http_retry_classification(
     error = _http_status_error(status_code)
 
     assert is_retryable_wikidot_error(error) is expected
+    assert is_retryable_wikidot_error(AMCHttpStatusCodeException("remote", status_code)) is expected
 
 
 def test_transport_error_is_retryable() -> None:
@@ -81,7 +83,7 @@ def test_retry_succeeds_after_transient_failures() -> None:
 
         return "success"
 
-    # Retry timing itself is not under test here. Removing waits keeps the test deterministic and fast.
+    # Removing waits keeps the test deterministic and fast; timing is not under test.
     operation.retry.wait = wait_none()
 
     result = operation()

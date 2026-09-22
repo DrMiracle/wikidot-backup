@@ -1,3 +1,4 @@
+"""Normalize Wikidot objects and isolate network operations from archive models."""
 from __future__ import annotations
 
 from typing import Any
@@ -6,16 +7,25 @@ import httpx
 import wikidot
 from bs4 import BeautifulSoup
 
-from wikidot_backup.config import LIST_PAGES_PER_PAGE
+from wikidot_backup.config import DEFAULT_REQUEST_TIMEOUT, LIST_PAGES_PER_PAGE
 from wikidot_backup.wikidot.amc import WikidotAmcClient
-from wikidot_backup.wikidot.models import WikidotPageData, WikidotUserData, WikidotPageRevisionData, WikidotFileData, \
-    WikidotSiteData
+from wikidot_backup.wikidot.errors import WikidotResourceError
+from wikidot_backup.wikidot.models import (
+    WikidotFileData,
+    WikidotPageData,
+    WikidotPageRevisionData,
+    WikidotSiteData,
+    WikidotUserData,
+)
 from wikidot_backup.wikidot.retry import retry_wikidot_request
-from wikidot_backup.wikidot.source import parse_current_source_response, parse_revision_source_response
-
+from wikidot_backup.wikidot.source import (
+    parse_current_source_response,
+    parse_revision_source_response,
+)
 
 
 class WikidotClient:
+    """Read a site's metadata, source and attachments."""
     def __init__(self, site_name: str) -> None:
         """Initialize access to a Wikidot site.
 
@@ -42,11 +52,10 @@ class WikidotClient:
 
         # To GET files through HTTP
         self._http = httpx.Client(
-            timeout=30.0,
+            timeout=DEFAULT_REQUEST_TIMEOUT,
             follow_redirects=True,
         )
 
-    @retry_wikidot_request
     def fetch_page(self, fullname: str) -> WikidotPageData:
         """Retrieve and normalize current data for one Wikidot page.
         Transient communication failures are retried automatically.
@@ -65,21 +74,18 @@ class WikidotClient:
             references.
 
         Raises:
-            LookupError:
+            WikidotResourceError:
                 If Wikidot does not return the requested page.
         """
 
-        page = self._site.page.get(fullname)
-
-        if page is None:
-            raise LookupError(f"Wikidot page not found: {fullname}")
+        page = self._get_page(fullname)
 
         page_id = page.id
         source = self.fetch_current_source(page_id)
 
         visible_tags, hidden_tags = self._split_tags(page.tags)
 
-        discussion = page.discussion
+        discussion = self._get_discussion(page)
 
         return WikidotPageData(
             page_id=page_id,
@@ -154,26 +160,25 @@ class WikidotClient:
     def fetch_page_revisions(
             self,
             fullname: str,
+            *,
+            expected_page_id: int | None = None,
     ) -> list[WikidotPageRevisionData]:
         """Retrieve normalized revision metadata for a Wikidot page.
 
         Args:
             fullname:
                 Canonical Wikidot page fullname.
+            expected_page_id:
+                Expected page identifier.
 
         Returns:
             Revision metadata in the order returned by Wikidot.
 
         Raises:
-            LookupError:
+            WikidotResourceError:
                 If Wikidot does not return the requested page.
         """
-        page = self._site.page.get(fullname)
-
-        if page is None:
-            raise LookupError(
-                f"Wikidot page not found: {fullname}"
-            )
+        page = self._get_page_once(fullname, expected_page_id=expected_page_id)
 
         return [
             WikidotPageRevisionData(
@@ -204,7 +209,7 @@ class WikidotClient:
             revision_id=str(revision_id),
         )
 
-        return parse_current_source_response(
+        return parse_revision_source_response(
             result["body"]
         )
 
@@ -228,11 +233,7 @@ class WikidotClient:
                 offset=offset,
             )
 
-            new_fullnames = [
-                fullname
-                for fullname in batch
-                if fullname not in seen
-            ]
+            new_fullnames = list(dict.fromkeys(name for name in batch if name not in seen))
 
             if not batch:
                 break
@@ -259,26 +260,25 @@ class WikidotClient:
     def fetch_page_files(
             self,
             fullname: str,
+            *,
+            expected_page_id: int | None = None,
     ) -> list[WikidotFileData]:
         """Retrieve normalized attachment metadata for a Wikidot page.
 
         Args:
             fullname:
                 Canonical Wikidot page fullname.
+            expected_page_id:
+                Expected page identifier.
 
         Returns:
             Metadata for all attachments currently associated with the page.
 
         Raises:
-            LookupError:
+            WikidotResourceError:
                 If Wikidot does not return the requested page.
         """
-        page = self._site.page.get(fullname)
-
-        if page is None:
-            raise LookupError(
-                f"Wikidot page not found: {fullname}"
-            )
+        page = self._get_page_once(fullname, expected_page_id=expected_page_id)
 
         return [
             WikidotFileData(
@@ -319,6 +319,35 @@ class WikidotClient:
 
         self._amc.close()
         self._http.close()
+        self._client.close()
+
+    @retry_wikidot_request
+    def _get_page(self, fullname: str, *, expected_page_id: int | None = None) -> Any:
+        """Retry metadata lookup independently of subsequent AMC source requests."""
+        return self._get_page_once(fullname, expected_page_id=expected_page_id)
+
+    @retry_wikidot_request
+    def _get_discussion(self, page: Any) -> Any:
+        """Retry the dependency's lazy discussion lookup independently of source."""
+        return page.discussion
+
+    def _get_page_once(self, fullname: str, *, expected_page_id: int | None = None) -> Any:
+        """Check the identity of the same object whose data will be collected."""
+        page = self._site.page.get(fullname)
+
+        if page is None:
+            raise WikidotResourceError(f"Wikidot page not found: {fullname}")
+
+        if page.fullname != fullname or (
+            expected_page_id is not None and page.id != expected_page_id
+        ):
+            raise WikidotResourceError(f"Wikidot page identity changed: {fullname}")
+
+        return page
+
+    def validate_page_identity(self, fullname: str, page_id: int) -> None:
+        """Check that a resumed fullname still identifies the archived page."""
+        self._get_page(fullname, expected_page_id=page_id)
 
     def _list_page_fullnames_batch(
             self,
@@ -381,7 +410,7 @@ class WikidotClient:
         container = soup.select_one(".list-pages-box")
 
         if container is None:
-            return []
+            raise RuntimeError("Could not find Wikidot ListPages content.")
 
         # Pagination controls are part of the same ListPages container.
         # Remove them before reading text so values such as "1", "2",
@@ -423,7 +452,7 @@ class WikidotClient:
 
     @staticmethod
     def _normalize_user(user: Any | None) -> WikidotUserData | None:
-        """Convert a wikidot.py user object into persistent dataclass.
+        """Convert a wikidot.py user object into a transient dataclass.
 
         Wikidot system, deleted or special users may not have a numeric ID,
         therefore the ID is intentionally nullable.

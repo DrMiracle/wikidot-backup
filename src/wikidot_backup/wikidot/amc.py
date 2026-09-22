@@ -6,6 +6,9 @@ import secrets
 from typing import Any
 
 import httpx
+
+from wikidot_backup.config import DEFAULT_REQUEST_TIMEOUT
+from wikidot_backup.wikidot.errors import WikidotResourceError
 from wikidot_backup.wikidot.retry import retry_wikidot_request
 
 
@@ -16,7 +19,7 @@ class WikidotAmcClient:
         self,
         base_url: str,
         *,
-        timeout: float = 30.0,
+        timeout: float = DEFAULT_REQUEST_TIMEOUT,
     ) -> None:
         """Initialize an AMC client for a Wikidot site."""
 
@@ -84,8 +87,11 @@ class WikidotAmcClient:
 
         result = response.json()
 
+        if not isinstance(result, dict) or not isinstance(result.get("status"), str):
+            raise RuntimeError("Invalid Wikidot AMC response structure.")
+
         if result.get("status") != "ok":
-            raise RuntimeError(
+            raise WikidotResourceError(
                 f"Wikidot AMC error: {result}"
             )
 

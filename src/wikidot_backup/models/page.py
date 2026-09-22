@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from wikidot_backup.config import SOURCE_FORMAT, TEXT_ENCODING, SOURCE_FILENAME
-from wikidot_backup.models.common import UserRef, SourceRef
+from wikidot_backup.models.common import SourceRef, UserRef
 
 
 class PageRecord(BaseModel):
@@ -20,7 +20,7 @@ class PageRecord(BaseModel):
     and may require a schema-version migration.
     """
 
-    schema_version: int = 1
+    schema_version: Literal[1] = 1
 
     page_id: int
 

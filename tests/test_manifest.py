@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from wikidot_backup.models.manifest import ArchiveSite
 from wikidot_backup.storage.manifest import (
@@ -168,3 +169,15 @@ def test_limited_run_does_not_erase_previous_full_backup(
 
     assert second.last_full_backup_at == full_backup_at
     assert second.last_successful_run_at is not None
+
+
+@pytest.mark.parametrize("field, value", [("schema_version", 2), ("archive_format", "other")])
+def test_unsupported_manifest_contract_is_rejected(tmp_path, field, value):
+    import json
+    store = ArchiveManifestStore(tmp_path)
+    store.ensure_archive(make_site())
+    data = json.loads(store.path.read_text(encoding="utf-8"))
+    data[field] = value
+    store.path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValidationError):
+        store.ensure_archive(make_site())

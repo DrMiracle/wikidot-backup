@@ -1,11 +1,12 @@
 """Reading and writing root archive metadata."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from wikidot_backup.config import TEXT_ENCODING, TEXT_NEWLINE
 from wikidot_backup.models.manifest import ArchiveManifest, ArchiveSite
+from wikidot_backup.storage.atomic import atomic_write
 
 
 class ArchiveManifestStore:
@@ -107,23 +108,14 @@ class ArchiveManifestStore:
             exist_ok=True,
         )
 
-        temporary_path = self.path.with_suffix(
-            ".json.tmp"
+        atomic_write(
+            self.path,
+            (manifest.model_dump_json(indent=2, exclude_none=False) + TEXT_NEWLINE).encode(
+                TEXT_ENCODING
+            ),
         )
-
-        temporary_path.write_text(
-            manifest.model_dump_json(
-                indent=2,
-                exclude_none=False,
-            )
-            + TEXT_NEWLINE,
-            encoding=TEXT_ENCODING,
-            newline=TEXT_NEWLINE,
-        )
-
-        temporary_path.replace(self.path)
 
     @staticmethod
     def _utc_now() -> datetime:
         """Return the current timezone-aware UTC timestamp."""
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)

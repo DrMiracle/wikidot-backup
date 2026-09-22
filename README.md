@@ -18,6 +18,7 @@ disaster recovery or migration to another wiki engine.
 - retry/backoff for transient Wikidot failures;
 - JSON and CSV page indexes for easier navigation;
 - root archive metadata (`archive.json`) with site identity and backup timestamps;
+- approximate backup size estimation from current source and remote metadata;
 - archive inspection with page, revision, attachment, error, and disk usage statistics.
 
 Forums, page discussions, external resources, and locally derived link data
@@ -25,7 +26,7 @@ are not yet archived.
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.12 through 3.14 (`>=3.12,<3.15`)
 - Internet access to the target Wikidot site
 
 ## Installation
@@ -83,6 +84,11 @@ Limit the number of pages processed, for example during testing:
 wikidot-backup backup scp-ukrainian --limit 20
 ```
 
+Any invocation using `--limit` retains resume state and does not update the
+last full-backup timestamp, even if it processes all remaining pages. Run
+without `--limit` to finalize the crawl. Failed page collections return exit
+code 1; an interrupted backup returns 130.
+
 Options can be combined:
 
 ```bash
@@ -91,7 +97,7 @@ wikidot-backup backup scp-ukrainian \
     --limit 20 \
     --output ./backup
 ```
-
+wikidot-backup backup scp-wiki --limit 20 --output ./temp-backup
 Run the built-in help for the complete CLI reference:
 
 ```bash
@@ -109,8 +115,13 @@ wikidot-backup estimate scp-ukrainian
 
 Has options:
 
-- `--revisions` - include every page revision;
+- `--revisions` - estimate historical source size from current source size and revision numbering;
 - `--no-files` - exclude files.
+- `--limit N` - inspect at most N pages (the result covers only those pages).
+
+Unknown attachment sizes and unknown revision counts are reported separately
+and excluded from the total. The estimate excludes metadata and filesystem
+overhead and does not account for attachment deduplication.
 
 ### Inspecting an archive
 
@@ -164,7 +175,8 @@ backup/
 │
 └── .state/
     ├── resume.jsonl
-    └── errors.jsonl
+    ├── errors.jsonl
+    └── transactions/                # temporary interrupted-write recovery
 ```
 
 ### `pages/<page_id>/page.json`
@@ -246,7 +258,11 @@ rebuilt from them.
 Contains temporary operational state used to resume interrupted or partial
 backup runs and record failures.
 
-It is not required to interpret the portable archive itself.
+After a completed write it is not required to interpret the portable archive.
+If a process stops while publishing page or revision files, keep the transaction
+directory: it contains the prior bytes needed for rollback. The next backup
+recovers interrupted writes before processing pages. `info` refuses to inspect
+a pending transaction. Do not run concurrent writers against the same archive.
 
 ## Archive formats
 
@@ -277,6 +293,7 @@ src/
     ├── wikidot/
     │   ├── amc.py
     │   ├── client.py
+    │   ├── errors.py
     │   ├── models.py
     │   ├── retry.py
     │   └── source.py
@@ -296,10 +313,12 @@ src/
     │
     ├── services/
     │   ├── backup.py
-    │   └── backup_types.py
+    │   ├── backup_types.py
+    │   └── estimate.py
     │
     ├── storage/
     │   ├── archive.py
+    │   ├── atomic.py
     │   ├── indexes.py
     │   ├── inspection.py
     │   ├── manifest.py
@@ -330,6 +349,15 @@ persisted. Interrupted runs can therefore retry unfinished work without
 invalidating components that were already archived.
 
 Transient network failures use bounded retry/backoff.
+
+Malformed metadata, unsupported schema versions, programming errors and disk
+failures abort the run. Expected remote resource/network failures are recorded
+per page. Resumed page identities are checked before skipping their content.
+Existing blobs are verified before reuse; corrupt blobs cause an error.
+
+Page/source pairs and revision collections are staged before publication and
+retain rollback copies until the group commits. Each file replacement is
+atomic; the recovery journal handles interruption between replacements.
 
 The archive stores original source text and attachment bytes separately from
 Wikidot-specific runtime objects so that the resulting data remains usable

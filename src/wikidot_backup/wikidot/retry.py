@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import ParamSpec, TypeVar
 
 import httpx
 from tenacity import (
@@ -11,16 +10,13 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential_jitter,
 )
+from wikidot.common.exceptions import AMCHttpStatusCodeException
 
 from wikidot_backup.config import (
     WIKIDOT_RETRY_ATTEMPTS,
     WIKIDOT_RETRY_INITIAL_WAIT_SECONDS,
     WIKIDOT_RETRY_MAX_WAIT_SECONDS,
 )
-
-
-P = ParamSpec("P")
-R = TypeVar("R")
 
 
 def is_retryable_wikidot_error(exception: BaseException) -> bool:
@@ -35,6 +31,9 @@ def is_retryable_wikidot_error(exception: BaseException) -> bool:
     if isinstance(exception, httpx.TransportError):
         return True
 
+    if isinstance(exception, AMCHttpStatusCodeException):
+        return exception.status_code in {408, 429} or 500 <= exception.status_code < 600
+
     if isinstance(exception, httpx.HTTPStatusError):
         status_code = exception.response.status_code
 
@@ -46,7 +45,7 @@ def is_retryable_wikidot_error(exception: BaseException) -> bool:
     return False
 
 
-def retry_wikidot_request(
+def retry_wikidot_request[**P, R](
     function: Callable[P, R],
 ) -> Callable[P, R]:
     """Apply the standard retry policy to a Wikidot integration call."""

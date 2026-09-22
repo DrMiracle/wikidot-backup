@@ -4,11 +4,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-from wikidot_backup.config import TEXT_ENCODING, TEXT_NEWLINE, SOURCE_FILENAME
+from wikidot_backup.config import SOURCE_FILENAME, TEXT_ENCODING, TEXT_NEWLINE
 from wikidot_backup.models.common import BlobRef
 from wikidot_backup.models.file import PageFileRecord, PageFilesRecord
 from wikidot_backup.models.page import PageRecord
 from wikidot_backup.models.revision import PageRevisionRecord
+from wikidot_backup.storage.atomic import ArchiveTransaction, archive_path, atomic_write
+from wikidot_backup.util.hashing import sha256_bytes, sha256_text
 
 
 class ArchiveWriter:
@@ -38,7 +40,7 @@ class ArchiveWriter:
             Directory in which the page was stored.
         """
 
-        # Use page IDs instead of fullnames because fullnames may contain ':', which is not valid in Windows filenames.
+        # Numeric IDs remain stable and avoid Windows-unsafe fullname characters.
         page_dir = self.root / "pages" / str(page.page_id)
 
         page_dir.mkdir(
@@ -46,24 +48,18 @@ class ArchiveWriter:
             exist_ok=True,
         )
 
-        source_path = page_dir / SOURCE_FILENAME
+        if page.source.path != SOURCE_FILENAME or sha256_text(source) != page.source.sha256:
+            raise ValueError("Page source reference does not match supplied source.")
 
-        source_path.write_text(
-            source,
-            encoding=TEXT_ENCODING,
-            newline=TEXT_NEWLINE,
-        )
-
-        metadata_path = page_dir / "page.json"
-
-        metadata_path.write_text(
-            page.model_dump_json(
-                indent=2,
-                exclude_none=False,
-            ),
-            encoding=TEXT_ENCODING,
-            newline=TEXT_NEWLINE,
-        )
+        with ArchiveTransaction(self.root) as transaction:
+            transaction.stage(
+                f"pages/{page.page_id}/{SOURCE_FILENAME}", source.encode(TEXT_ENCODING),
+            )
+            transaction.stage(
+                f"pages/{page.page_id}/page.json",
+                page.model_dump_json(indent=2, exclude_none=False).encode(TEXT_ENCODING),
+            )
+            transaction.commit()
 
         return page_dir
 
@@ -74,8 +70,8 @@ class ArchiveWriter:
     ) -> int:
         """Write complete revision history for one archived page.
 
-        Revision sources are written as they are collected. The metadata JSONL
-        file is written only after the complete revision iterator finishes.
+        Sources are staged as collected. Canonical files are published only
+        after the complete iterator finishes, retaining rollback copies.
 
         Args:
             page_id:
@@ -95,36 +91,21 @@ class ArchiveWriter:
         )
 
         records: list[PageRevisionRecord] = []
+        with ArchiveTransaction(self.root) as transaction:
+            for record, source in revisions:
+                expected = f"revisions/sources/{record.revision_id}.txt"
+                if (record.page_id != page_id or record.source.path != expected
+                        or record.source.sha256 != sha256_text(source)):
+                    raise ValueError("Revision source reference does not match supplied source.")
 
-        for record, source in revisions:
-            source_path = page_dir / record.source.path
-            source_path.parent.mkdir(
-                parents=True,
-                exist_ok=True,
+                transaction.stage(f"pages/{page_id}/{expected}", source.encode(TEXT_ENCODING))
+                records.append(record)
+
+            transaction.stage(
+                f"pages/{page_id}/revisions/revisions.jsonl",
+                "".join(r.model_dump_json() + TEXT_NEWLINE for r in records).encode(TEXT_ENCODING),
             )
-
-            source_path.write_text(
-                source,
-                encoding=TEXT_ENCODING,
-                newline=TEXT_NEWLINE,
-            )
-
-            records.append(record)
-
-        metadata_path = revisions_dir / "revisions.jsonl"
-
-        with metadata_path.open(
-                "w",
-                encoding=TEXT_ENCODING,
-                newline=TEXT_NEWLINE,
-        ) as file:
-            for record in records:
-                file.write(
-                    record.model_dump_json(
-                        exclude_none=False
-                    )
-                )
-                file.write(TEXT_NEWLINE)
+            transaction.commit()
 
         return len(records)
 
@@ -162,6 +143,9 @@ class ArchiveWriter:
         records: list[PageFileRecord] = []
 
         for record, content in files:
+            if record.page_id != page_id or record.content is None:
+                raise ValueError("Attachment must have matching page identity and content.")
+
             self.save_blob(
                 record.content,
                 content,
@@ -176,29 +160,10 @@ class ArchiveWriter:
 
         metadata_path = page_dir / "files.json"
 
-        temporary_path = metadata_path.with_suffix(
-            ".json.tmp"
+        atomic_write(
+            metadata_path,
+            (metadata.model_dump_json(indent=2) + TEXT_NEWLINE).encode(TEXT_ENCODING),
         )
-
-        # So that files.json is atomic - either full completion or no completion.
-        try:
-            temporary_path.write_text(
-                metadata.model_dump_json(
-                    indent=2,
-                    exclude_none=False,
-                )
-                + TEXT_NEWLINE,
-                encoding=TEXT_ENCODING,
-                newline=TEXT_NEWLINE,
-            )
-
-            temporary_path.replace(
-                metadata_path
-            )
-        finally:
-            temporary_path.unlink(
-                missing_ok=True
-            )
 
         return len(records)
 
@@ -218,9 +183,13 @@ class ArchiveWriter:
                 "Blob size does not match supplied content."
             )
 
-        path = self.root / blob.path
+        if sha256_bytes(content) != blob.sha256 or blob.path != f"blobs/sha256/{blob.sha256}":
+            raise ValueError("Blob hash or path does not match supplied content.")
+        path = archive_path(self.root, blob.path)
 
         if path.is_file():
+            if path.stat().st_size != blob.size or sha256_bytes(path.read_bytes()) != blob.sha256:
+                raise RuntimeError(f"Corrupted existing blob: {path}")
             return
 
         path.parent.mkdir(
@@ -228,14 +197,4 @@ class ArchiveWriter:
             exist_ok=True,
         )
 
-        temporary_path = path.with_name(
-            f"{path.name}.tmp"
-        )
-
-        try:
-            temporary_path.write_bytes(content)
-            temporary_path.replace(path)
-        finally:
-            temporary_path.unlink(
-                missing_ok=True
-            )
+        atomic_write(path, content)

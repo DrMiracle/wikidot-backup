@@ -1,7 +1,6 @@
 """Normalized data structures returned by the Wikidot integration layer."""
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 
 @dataclass(slots=True)
@@ -49,13 +48,13 @@ class WikidotPageData:
     latest_revision_no: int | None
 
     created_by: WikidotUserData | None
-    created_at: Any | None
+    created_at: datetime | None
 
     updated_by: WikidotUserData | None
-    updated_at: Any | None
+    updated_at: datetime | None
 
     commented_by: WikidotUserData | None
-    commented_at: Any | None
+    commented_at: datetime | None
 
     discussion_thread_id: int | None
 

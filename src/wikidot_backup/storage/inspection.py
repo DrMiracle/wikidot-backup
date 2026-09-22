@@ -1,13 +1,17 @@
 """Inspection of an existing filesystem archive."""
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from wikidot_backup.config import TEXT_ENCODING
 from wikidot_backup.models.file import PageFilesRecord
 from wikidot_backup.models.page import PageRecord
+from wikidot_backup.models.revision import PageRevisionRecord
+from wikidot_backup.storage.atomic import archive_path, require_settled_archive
+from wikidot_backup.storage.state import load_page_states
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +47,7 @@ def inspect_archive(
         raise FileNotFoundError(
             f"Archive directory not found: {root}"
         )
+    require_settled_archive(root)
 
     pages_dir = root / "pages"
     blobs_dir = root / "blobs" / "sha256"
@@ -69,15 +74,18 @@ def inspect_archive(
                         encoding=TEXT_ENCODING,
                     )
                 )
-            except Exception as exc:
+            except ValidationError as exc:
                 raise RuntimeError(
                     f"Invalid page metadata: {metadata_path}"
                 ) from exc
 
+            if page_dir.name != str(page.page_id):
+                raise RuntimeError(f"Page identity does not match directory: {metadata_path}")
+
             pages += 1
 
             if (
-                    page_dir / page.source.path
+                    archive_path(page_dir, page.source.path)
             ).is_file():
                 current_sources += 1
 
@@ -92,10 +100,15 @@ def inspect_archive(
                             )
                         )
                     )
-                except Exception as exc:
+                except ValidationError as exc:
                     raise RuntimeError(
                         f"Invalid attachment metadata: {files_path}"
                     ) from exc
+
+                if files_record.page_id != page.page_id or any(
+                    item.page_id != page.page_id for item in files_record.files
+                ):
+                    raise RuntimeError(f"Attachment page identity mismatch: {files_path}")
 
                 pages_with_file_metadata += 1
                 file_records += len(
@@ -110,15 +123,13 @@ def inspect_archive(
 
             if revisions_path.is_file():
                 pages_with_revisions += 1
-                revisions += _count_nonempty_lines(
-                    revisions_path
-                )
+                revisions += _count_revisions(revisions_path, page.page_id)
 
     unique_blobs = (
         sum(
             1
             for path in blobs_dir.iterdir()
-            if path.is_file()
+            if path.is_file() and not path.name.endswith(".tmp")
         )
         if blobs_dir.is_dir()
         else 0
@@ -135,9 +146,7 @@ def inspect_archive(
         pages_with_revisions=pages_with_revisions,
         revisions=revisions,
         resume_present=resume_path.is_file(),
-        resume_pages=_count_unique_resume_pages(
-            resume_path
-        ),
+        resume_pages=len(load_page_states(resume_path)),
         error_records=_count_nonempty_lines(
             root / ".state" / "errors.jsonl"
         ),
@@ -175,40 +184,25 @@ def _count_nonempty_lines(
         )
 
 
-def _count_unique_resume_pages(
-        path: Path,
-) -> int:
-    """Count unique pages represented in resume state."""
-    if not path.is_file():
-        return 0
-
-    fullnames: set[str] = set()
-
-    with path.open(
-            "r",
-            encoding=TEXT_ENCODING,
-    ) as file:
-        for line_number, line in enumerate(
-                file,
-                start=1,
-        ):
+def _count_revisions(path: Path, page_id: int) -> int:
+    """Validate revision metadata before reporting it as archived records."""
+    count = 0
+    with path.open(encoding=TEXT_ENCODING) as file:
+        for line_number, line in enumerate(file, start=1):
             if not line.strip():
                 continue
 
             try:
-                record = json.loads(line)
-            except json.JSONDecodeError as exc:
+                record = PageRevisionRecord.model_validate_json(line)
+                if record.page_id != page_id:
+                    raise ValueError("Revision belongs to a different page")
+            except ValueError as exc:
                 raise RuntimeError(
-                    f"Invalid resume state in {path} "
-                    f"at line {line_number}."
+                    f"Invalid revision metadata in {path} at line {line_number}."
                 ) from exc
 
-            fullname = record.get("fullname")
-
-            if isinstance(fullname, str):
-                fullnames.add(fullname)
-
-    return len(fullnames)
+            count += 1
+    return count
 
 
 def _directory_size(

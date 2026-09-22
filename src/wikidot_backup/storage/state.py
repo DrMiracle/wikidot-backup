@@ -1,9 +1,10 @@
 """Temporary state used to resume interrupted backup runs."""
+
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,9 +17,7 @@ class PageBackupState:
     """Resume information accumulated for one Wikidot page."""
 
     page_id: int | None = None
-    completed_components: set[BackupComponent] = field(
-        default_factory=set
-    )
+    completed_components: set[BackupComponent] = field(default_factory=set)
 
 
 class BackupState:
@@ -43,18 +42,9 @@ class BackupState:
 
         self.state_dir = archive_root / ".state"
 
-        self.completed_path = (
-                self.state_dir / "resume.jsonl"
-        )
+        self.completed_path = self.state_dir / "resume.jsonl"
 
-        self.errors_path = (
-                self.state_dir / "errors.jsonl"
-        )
-
-        self.state_dir.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        self.errors_path = self.state_dir / "errors.jsonl"
 
     def load_page_states(self) -> dict[str, PageBackupState]:
         """Return completed backup components grouped by page fullname.
@@ -70,121 +60,21 @@ class BackupState:
             RuntimeError:
                 If resume state contains malformed or unsupported records.
         """
-        if not self.completed_path.exists():
-            return {}
-
-        states: dict[str, PageBackupState] = {}
-
-        with self.completed_path.open("r", encoding=TEXT_ENCODING) as file:
-            for line_number, line in enumerate(file, start=1):
-                line = line.strip()
-
-                if not line:
-                    continue
-
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    raise RuntimeError(
-                        f"Invalid resume state in "
-                        f"{self.completed_path} "
-                        f"at line {line_number}."
-                    ) from exc
-
-                fullname = record.get("fullname")
-                page_id = record.get("page_id")
-                component_raw = record.get("component")
-
-                if not isinstance(fullname, str):
-                    raise RuntimeError(
-                        f"Invalid fullname in "
-                        f"{self.completed_path} "
-                        f"at line {line_number}."
-                    )
-
-                if not isinstance(page_id, int):
-                    raise RuntimeError(
-                        f"Invalid page ID in "
-                        f"{self.completed_path} "
-                        f"at line {line_number}."
-                    )
-
-                # Older resume records predate component tracking. Such records
-                # represented successful archival of the current page itself.
-                if component_raw is None:
-                    component = BackupComponent.PAGE
-                else:
-                    try:
-                        component = BackupComponent(
-                            component_raw
-                        )
-                    except (TypeError, ValueError) as exc:
-                        raise RuntimeError(
-                            f"Invalid backup component in "
-                            f"{self.completed_path} "
-                            f"at line {line_number}: "
-                            f"{component_raw!r}."
-                        ) from exc
-
-                page_state = states.setdefault(
-                    fullname,
-                    PageBackupState(),
-                )
-
-                # A fullname should not refer to different page IDs within one
-                # resumable backup state. Treat that as inconsistent state rather
-                # than silently combining records from different pages.
-                if page_state.page_id is not None and page_state.page_id != page_id:
-                    raise RuntimeError(
-                        f"Conflicting page IDs for {fullname!r} "
-                        f"in {self.completed_path} "
-                        f"at line {line_number}."
-                    )
-
-                page_state.page_id = page_id
-                page_state.completed_components.add(
-                    component
-                )
-
-        return states
+        return load_page_states(self.completed_path)
 
     def start_run(self) -> None:
-        """Start a new backup attempt.
-
-        The error log represents only the current attempt, so it is cleared
-        when a run starts. Completed-page state is intentionally preserved
-        because it is required for resume.
-        """
-
-        self.errors_path.write_text(
-            "",
-            encoding=TEXT_ENCODING,
-            newline=TEXT_NEWLINE,
-        )
+        """Clear this attempt's errors while preserving component resume records."""
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.errors_path.write_text("", encoding=TEXT_ENCODING, newline=TEXT_NEWLINE)
 
     def record_component_completed(
-            self,
-            *,
-            fullname: str,
-            page_id: int,
-            component: BackupComponent,
+        self,
+        *,
+        fullname: str,
+        page_id: int,
+        component: BackupComponent,
     ) -> None:
-        """Record one safely persisted backup component for a page.
-
-        This method must be called only after both page metadata and source
-        have been successfully written.
-
-        Args:
-            fullname:
-                Canonical Wikidot page fullname.
-
-            page_id:
-                Numeric Wikidot page ID.
-
-            component:
-                Backup component that have been archived.
-        """
-
+        """Record a component only after all its required data is persisted."""
         self._append_json_line(
             self.completed_path,
             {
@@ -195,22 +85,8 @@ class BackupState:
             },
         )
 
-    def record_error(
-            self,
-            *,
-            fullname: str,
-            exception: Exception,
-    ) -> None:
-        """Record a page collection failure for the current run.
-
-        Args:
-            fullname:
-                Wikidot page fullname that could not be archived.
-
-            exception:
-                Exception raised while collecting or writing the page.
-        """
-
+    def record_error(self, *, fullname: str, exception: Exception) -> None:
+        """Record an expected remote collection failure for the current attempt."""
         self._append_json_line(
             self.errors_path,
             {
@@ -222,33 +98,84 @@ class BackupState:
         )
 
     def clear_resume_state(self) -> None:
-        """Remove temporary resume state after a complete successful crawl."""
-
-        if self.completed_path.exists():
-            self.completed_path.unlink()
+        """Remove resume state after a successful unlimited crawl."""
+        self.completed_path.unlink(missing_ok=True)
 
     @staticmethod
     def _utc_now() -> str:
         """Return a timezone-aware UTC timestamp suitable for JSON."""
-
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
 
     @staticmethod
-    def _append_json_line(
-            path: Path,
-            record: dict[str, Any],
-    ) -> None:
+    def _append_json_line(path: Path, record: dict[str, Any]) -> None:
         """Append one JSON object to a UTF-8 JSONL file."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding=TEXT_ENCODING, newline=TEXT_NEWLINE) as file:
+            file.write(json.dumps(record, ensure_ascii=False) + TEXT_NEWLINE)
 
-        serialized = json.dumps(
-            record,
-            ensure_ascii=False,
-        )
 
-        with path.open(
-                "a",
-                encoding=TEXT_ENCODING,
-                newline=TEXT_NEWLINE,
-        ) as file:
-            file.write(serialized)
-            file.write(TEXT_NEWLINE)
+def load_page_states(path: Path) -> dict[str, PageBackupState]:
+    """Read and validate legacy/current resume records without modifying the archive."""
+    if not path.exists():
+        return {}
+
+    states: dict[str, PageBackupState] = {}
+
+    with path.open("r", encoding=TEXT_ENCODING) as file:
+        for line_number, line in enumerate(file, start=1):
+            line = line.strip()
+
+            if not line:
+                continue
+
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(
+                    f"Invalid resume state in {path} at line {line_number}."
+                ) from exc
+
+            if not isinstance(record, dict):
+                raise RuntimeError(f"Invalid resume record in {path} at line {line_number}.")
+            fullname = record.get("fullname")
+            page_id = record.get("page_id")
+            component_raw = record.get("component")
+
+            if not isinstance(fullname, str) or not fullname:
+                raise RuntimeError(f"Invalid fullname in {path} at line {line_number}.")
+
+            if type(page_id) is not int or page_id < 1:
+                raise RuntimeError(f"Invalid page ID in {path} at line {line_number}.")
+
+            # Older resume records predate component tracking. Such records
+            # represented successful archival of the current page itself.
+            if "component" not in record:
+                component = BackupComponent.PAGE
+            else:
+                try:
+                    component = BackupComponent(component_raw)
+                except (TypeError, ValueError) as exc:
+                    raise RuntimeError(
+                        f"Invalid backup component in "
+                        f"{path} "
+                        f"at line {line_number}: "
+                        f"{component_raw!r}."
+                    ) from exc
+
+            page_state = states.setdefault(
+                fullname,
+                PageBackupState(),
+            )
+
+            # A fullname should not refer to different page IDs within one
+            # resumable backup state. Treat that as inconsistent state rather
+            # than silently combining records from different pages.
+            if page_state.page_id is not None and page_state.page_id != page_id:
+                raise RuntimeError(
+                    f"Conflicting page IDs for {fullname!r} in {path} at line {line_number}."
+                )
+
+            page_state.page_id = page_id
+            page_state.completed_components.add(component)
+
+    return states

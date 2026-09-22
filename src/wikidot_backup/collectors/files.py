@@ -32,7 +32,7 @@ def collect_page_files(
         Persistent attachment metadata paired with original binary content.
     """
     files = client.fetch_page_files(
-        fullname
+        fullname, expected_page_id=page_id,
     )
 
     for file in files:

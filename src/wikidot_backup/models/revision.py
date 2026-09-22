@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -11,7 +12,7 @@ from wikidot_backup.models.common import SourceRef, UserRef
 class PageRevisionRecord(BaseModel):
     """Persistent archive representation of one Wikidot page revision."""
 
-    schema_version: int = 1
+    schema_version: Literal[1] = 1
 
     page_id: int
 

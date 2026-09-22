@@ -22,6 +22,7 @@ class BackupEstimate:
 
     revision_records: int
     revision_source_estimated_bytes: int
+    pages_with_unknown_revision_count: int = 0
 
     @property
     def estimated_total_bytes(self) -> int:
@@ -58,6 +59,8 @@ def estimate_backup(
     Returns:
         Aggregate estimate for the selected pages.
     """
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be at least 1")
     fullnames = client.list_page_fullnames()
 
     if limit is not None:
@@ -71,6 +74,7 @@ def estimate_backup(
 
     revision_records = 0
     revision_source_estimated_bytes = 0
+    pages_with_unknown_revision_count = 0
 
     for fullname in fullnames:
         page = client.fetch_page(fullname)
@@ -82,7 +86,7 @@ def estimate_backup(
 
         if options.include_files:
             files = client.fetch_page_files(
-                fullname
+                fullname, expected_page_id=page.page_id,
             )
 
             for file in files:
@@ -94,6 +98,9 @@ def estimate_backup(
                     attachment_reported_bytes += file.size
 
         if options.include_revisions:
+            if page.latest_revision_no is None:
+                pages_with_unknown_revision_count += 1
+                continue
             # Wikidot revision numbering starts at 0. The value exposed
             # by page metadata is therefore the latest revision number,
             # not the number of stored revision versions.
@@ -119,4 +126,5 @@ def estimate_backup(
         revision_source_estimated_bytes=(
             revision_source_estimated_bytes
         ),
+        pages_with_unknown_revision_count=pages_with_unknown_revision_count,
     )

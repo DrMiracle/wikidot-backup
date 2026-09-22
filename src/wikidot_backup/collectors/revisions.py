@@ -36,7 +36,7 @@ def collect_page_revisions(
     Yields:
         Tuples containing persistent revision metadata and its raw source.
     """
-    revisions = client.fetch_page_revisions(fullname)
+    revisions = client.fetch_page_revisions(fullname, expected_page_id=page_id)
 
     for revision in revisions:
         yield collect_page_revision(

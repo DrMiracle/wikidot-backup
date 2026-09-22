@@ -11,7 +11,6 @@ LIST_PAGES_PER_PAGE = 250
 
 DEFAULT_OUTPUT_DIR = "backup"
 DEFAULT_REQUEST_TIMEOUT = 30.0
-DEFAULT_REQUEST_DELAY = 0.5
 
 # Network retry policy for transient Wikidot failures.
 WIKIDOT_RETRY_ATTEMPTS = 4
