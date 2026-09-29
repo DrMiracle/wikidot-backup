@@ -33,22 +33,105 @@ the public endpoints used here.
 
 ## Installation
 
-Create a virtual environment:
+### Windows: first-time setup
 
-```bash
-python -m venv .venv
-```
+You do not need PyCharm or programming experience to run the tool. The commands
+below go into **PowerShell**. Copy only
+the commands inside each code block, run them in order, and wait for each to finish.
 
-Windows PowerShell:
+#### 1. Install Python
+
+Install the **Python install manager** from [python.org](https://www.python.org/downloads/windows/).
+Open PowerShell from the Start menu (reopen it if it was already open), then run:
 
 ```powershell
-.venv\Scripts\Activate.ps1
+py install 3.14
+py -3.14 --version
 ```
 
-Install the project in editable mode with development dependencies:
+The second command should print `Python 3.14.x`. If you already have Python 3.14,
+you can skip the installation command. Python 3.12 and 3.13 also work: use your
+installed version in place of `3.14` in the environment-creation command below.
+Python 3.15 and later are not currently supported by this project.
 
-```bash
-python -m pip install -e ".[dev]"
+If `py` is not recognized, reopen PowerShell and check that installation finished.
+If `py install` tries to open a file named `install`, an older Python launcher is
+handling the command; see the [official Windows setup guide](https://docs.python.org/3/using/windows.html).
+
+#### 2. Download and open the project folder
+
+Open the [project repository](https://github.com/DrMiracle/wikidot-backup), choose
+**Code → Download ZIP**, and extract the ZIP. Open the extracted folder containing
+`pyproject.toml`, `README.md`, and `src`—not the ZIP itself or its parent folder.
+
+In File Explorer's address bar, type `powershell` and press Enter. This opens
+PowerShell in that folder. Check your location:
+
+```powershell
+Get-Item .\pyproject.toml
+```
+
+If it says the file cannot be found, open the correct folder before continuing.
+
+#### 3. Create a private Python environment
+
+A virtual environment is a folder containing this project's Python environment
+and libraries. It keeps them separate from those used by other programs.
+
+```powershell
+py -3.14 -m venv .venv
+```
+
+This creates a `.venv` folder inside the project. No output usually means success.
+You only need to create it once for this copy of the project.
+
+#### 4. Install the backup tool
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e .
+```
+
+This downloads the required libraries and installs the command.
+Keep the project folder in place after installation. Internet access is needed.
+
+#### 5. Check the installation and try a small backup
+
+```powershell
+.\.venv\Scripts\wikidot-backup.exe --help
+.\.venv\Scripts\wikidot-backup.exe backup scp-ukrainian --limit 1
+```
+
+Help should list the commands and options. The second command downloads one
+page and its attachments into `backup` inside the current folder. Page discovery
+still checks the site first, so this may take a little time. You can use
+`--output ./my-backup` to choose another archive directory.
+
+#### 6. Use the shorter commands shown below
+
+To type `wikidot-backup` instead of its full path, activate the environment:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+wikidot-backup --help
+```
+
+You will normally see `(.venv)` at the start of your prompt. Activate it again
+whenever you open a new PowerShell window, after opening the project folder.
+You do not need to repeat environment creation or installation each time.
+
+If PowerShell says script execution is disabled, activation is optional: continue
+using `.\.venv\Scripts\wikidot-backup.exe` in place of `wikidot-backup` in every
+example. No execution-policy change is needed. Python's
+[virtual environment documentation](https://docs.python.org/3/library/venv.html)
+explains how direct executable paths work without activation.
+
+### Optional: development tools
+
+Only install these extras if you want to run tests or work on the code:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
 ## Usage
@@ -93,13 +176,19 @@ code 1; an interrupted backup returns 130.
 
 Options can be combined:
 
-```bash
-wikidot-backup backup scp-ukrainian \
-    --revisions \
-    --limit 20 \
-    --output ./backup
+```powershell
+wikidot-backup backup scp-ukrainian --revisions --limit 20 --output ./backup
 ```
-wikidot-backup backup scp-wiki --limit 20 --output ./temp-backup
+
+You can also back up another site into a separate directory:
+
+```bash
+wikidot-backup backup scp-ukrainian --output ./backup-ukrainian
+wikidot-backup backup scp-wiki --output ./backup-english
+```
+
+Each archive directory belongs to one site; the manifest prevents mixing sites.
+
 Run the built-in help for the complete CLI reference:
 
 ```bash
@@ -259,7 +348,7 @@ render its posts as nested comments. The intended readable layout is:
 ```text
 export/
 ├── pages/
-│   └── scp-009-ua-arc/
+│   └── scp-182-ua/
 │       ├── page.json
 │       ├── source.txt
 │       ├── files/<original-filename>
@@ -344,9 +433,9 @@ from `files.json`.
 For example:
 
 ```text
-pages/802215837/files.json
+pages/123456789/files.json
         │
-        │ name = Gold_credit_card009ua.jpg
+        │ name = photo.jpg
         │ sha256 = abc...
         ▼
 blobs/sha256/abc...
