@@ -12,6 +12,7 @@ disaster recovery or migration to another wiki engine.
 - current page metadata and raw Wikidot source;
 - page attachments and attachment metadata;
 - optional complete page revision history;
+- public forum threads and page discussions, with optional rendered post revisions;
 - revision authors, timestamps, comments, and historical source;
 - content-addressed attachment storage with SHA-256 integrity hashes;
 - resumable component-aware backup runs;
@@ -21,8 +22,9 @@ disaster recovery or migration to another wiki engine.
 - approximate backup size estimation from current source and remote metadata;
 - archive inspection with page, revision, attachment, error, and disk usage statistics.
 
-Forums, page discussions, external resources, and locally derived link data
-are not yet archived.
+External resources and locally derived link data are not yet archived.
+Forum content is rendered HTML; raw forum wiki source is unavailable through
+the public endpoints used here.
 
 ## Requirements
 
@@ -105,6 +107,56 @@ wikidot-backup --help
 wikidot-backup backup --help
 ```
 
+### Backing up forums and discussions
+
+Normal output shows progress for pages, forum category discovery, and threads.
+Use `--verbose` (or `-v`) on `backup` or `backup-forums` to print individual
+saved pages/threads and discovered categories. Coverage warnings and the final
+failure summary remain visible without verbose mode.
+
+```powershell
+wikidot-backup backup scp-ukrainian --forums --limit 20
+wikidot-backup backup scp-ukrainian --forums --revisions
+```
+
+Add `--forums` to include forums in a site backup. Pages are collected first,
+then forum discovery follows public category listings and discussion thread IDs
+in archived `page.json` files. Each thread is stored once. This does not discover inaccessible
+threads or discussions absent from both the forum listing and archived pages.
+
+With `--forums`, `--limit N` restricts pages and threads independently to N each;
+category discovery still runs in full. `--revisions` includes both page history
+and every publicly listed post version, including the initial
+version of unedited posts. Both current and historical content are labelled
+as HTML, never as original wiki markup. Embedded images are not downloaded.
+
+Completed threads are skipped while resuming. Adding `--revisions` causes
+threads without history to be fetched again. An unlimited run without failures
+or coverage warnings clears forum state; subsequent runs fetch fresh content.
+
+Reported counts are checked against retrieved records. Count discrepancies
+are recorded as coverage warnings and return exit code **2**, with resume state
+retained. Remote failures return **1**; interruption returns **130**. A limited
+batch without problems returns **0**, but does not mean the whole forum is saved.
+For example, the target site's discussion category reported 2017 threads while
+all 101 listing pages exposed only 1953 during reconnaissance; its cause is
+unknown. The archive records this gap rather than claiming complete coverage.
+
+Combined backups update the manifest and clear both resume files only when
+pages and forums succeed without coverage warnings. Limited runs retain both
+resume files and do not set the full-backup timestamp.
+
+For forum-only retries, the separate command remains available:
+
+```powershell
+wikidot-backup backup-forums scp-ukrainian --revisions
+wikidot-backup backup-forums scp-ukrainian --refresh --limit 20
+```
+
+`--refresh` discards only forum completion state and fetches fresh snapshots.
+Forum-only runs never set the full site-backup timestamp. `info` reports stored
+forum threads, posts, revisions and disk usage.
+
 ### Estimating an archive's size
 
 Estimate approximate size of the archive (can take a while, since we're doing full crawl through every page):
@@ -122,6 +174,7 @@ Has options:
 Unknown attachment sizes and unknown revision counts are reported separately
 and excluded from the total. The estimate excludes metadata and filesystem
 overhead and does not account for attachment deduplication.
+Forum content is excluded from the estimate.
 
 ### Inspecting an archive
 
@@ -173,11 +226,92 @@ backup/
 │   ├── pages.json
 │   └── pages.csv
 │
+├── forums/
+│   ├── catalog.json               # latest discovery, with its run_id
+│   ├── runs/<UTC-timestamp>-<unique-suffix>/
+│   │   ├── catalog.json           # immutable discovery snapshot for this run
+│   │   └── report.json            # results and warnings, written when run finishes
+│   └── threads/<thread_id>/
+│       ├── thread.json
+│       ├── posts.jsonl
+│       └── post-revisions.jsonl    # only with forum --revisions
+│
 └── .state/
     ├── resume.jsonl
     ├── errors.jsonl
+    ├── forum-resume.jsonl
+    ├── forum-errors.jsonl
     └── transactions/                # temporary interrupted-write recovery
 ```
+
+### Forum records
+
+A **thread** is one discussion topic, such as all comments on a page. A **post**
+is one comment or reply within that thread. `thread.json` holds the topic's title,
+category and page links; `posts.jsonl` holds the comments, their authors and reply
+relationships. Both are needed to reconstruct the discussion. Post revisions
+are earlier versions of individual comments, not additional discussions.
+
+These are canonical archive records, not the final browsing interface. An export
+can follow `page.json.discussion_thread_id` to the matching forum directory and
+render its posts as nested comments. The intended readable layout is:
+
+```text
+export/
+├── pages/
+│   └── scp-009-ua-arc/
+│       ├── page.json
+│       ├── source.txt
+│       ├── files/<original-filename>
+│       ├── comments.html
+│       └── comments.json
+└── forums/
+    └── <category>/<thread-name>/discussion.html
+```
+
+This export is planned, not implemented. General forum topics belong under
+`export/forums/`; page discussions appear beside their pages. An exporter should
+use `observed_post_ids` and `parent_id` to reconstruct the latest discussion,
+and label retained older posts separately. It should render the structured post
+records, not replay the raw AMC interface HTML from `thread.json.responses`.
+Raw responses preserve evidence and metadata; catalogs and run reports support
+recovery and coverage auditing. None requires changing the numeric canonical
+paths or duplicating comments in the working archive.
+
+`forums/catalog.json` is the latest completed discovery, even when the subsequent
+thread crawl is incomplete. Its `run_id` names a timestamped directory under
+`forums/runs/`, containing the same catalog and the run's report. If interrupted
+before reporting, the directory has a catalog but no report. Historical snapshots
+preserve categories and groups that disappear from later listings. Existing
+`catalogs/<uuid>.json` and `runs/<uuid>.json` files are retained; older catalogs
+remain readable when no current `catalog.json` exists.
+
+Public group IDs are not exposed: category
+`group_position` refers to that catalog's `groups_html` list, not a remote ID.
+Each catalog includes the original forum index HTML and discovery warnings.
+
+`thread.json` records thread metadata, references from archived pages, the
+latest observed post IDs in display order, and original thread/posts endpoint
+bodies. `posts.jsonl` stores authors, UTC timestamps, reply parent IDs, titles
+and rendered HTML. Extracted titles trim transport padding; original bodies
+retain it. New post HTML contains only the content element's inner HTML; the
+outer Wikidot `div.content` wrapper is excluded. Formatting, nested elements and
+whitespace are preserved through DOM serialization, without text cleanup. The
+original response remains in `thread.json.responses`. Older wrapped post records
+remain valid HTML and are not automatically rewritten; refetching a post writes
+the cleaner form.
+Revision HTML is saved unchanged from the endpoint's `content` field.
+`history_position` is a derived, zero-based ordering, not a Wikidot revision number.
+
+Later snapshots update observed posts and retain previously saved posts and
+revisions that are now absent. Use `observed_post_ids` to distinguish the latest
+snapshot from retained records. `revisions_included` describes the latest
+snapshot; historical revision records may remain after a run without revisions.
+Thread files publish as a recoverable transaction before completion is recorded.
+
+Run reports retain errors and warnings. `.state/forum-errors.jsonl` contains
+the most recent invocation that encountered thread failures, including interrupted
+runs; it is diagnostic history, not an indicator of current completion.
 
 ### `pages/<page_id>/page.json`
 
@@ -232,6 +366,9 @@ tree using the original filenames without modifying the archived data.
 Created when `--revisions` is enabled.
 
 `revisions.jsonl` contains one metadata record for each page revision.
+Newly written histories are ordered by `revision_no`, oldest first (`0, 1, 2, ...`).
+Older archives may use newest-first order and remain valid; readers should use
+`revision_no` rather than line position. Existing files are not automatically reordered.
 `sources/<revision_id>.txt` contains the corresponding historical Wikidot
 source.
 
@@ -294,6 +431,7 @@ src/
     │   ├── amc.py
     │   ├── client.py
     │   ├── errors.py
+    │   ├── forum_client.py
     │   ├── models.py
     │   ├── retry.py
     │   └── source.py
@@ -301,6 +439,7 @@ src/
     ├── models/
     │   ├── common.py
     │   ├── file.py
+    │   ├── forum_records.py
     │   ├── manifest.py
     │   ├── page.py
     │   └── revision.py
@@ -308,17 +447,20 @@ src/
     ├── collectors/
     │   ├── common.py
     │   ├── files.py
+    │   ├── forum_threads.py
     │   ├── pages.py
     │   └── revisions.py
     │
     ├── services/
     │   ├── backup.py
     │   ├── backup_types.py
+    │   ├── forum_backup.py
     │   └── estimate.py
     │
     ├── storage/
     │   ├── archive.py
     │   ├── atomic.py
+    │   ├── forum_archive.py
     │   ├── indexes.py
     │   ├── inspection.py
     │   ├── manifest.py

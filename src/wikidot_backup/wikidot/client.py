@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 from wikidot_backup.config import DEFAULT_REQUEST_TIMEOUT, LIST_PAGES_PER_PAGE
 from wikidot_backup.wikidot.amc import WikidotAmcClient
 from wikidot_backup.wikidot.errors import WikidotResourceError
+from wikidot_backup.wikidot.forum_client import WikidotForumClient
 from wikidot_backup.wikidot.models import (
     WikidotFileData,
     WikidotPageData,
@@ -55,6 +56,11 @@ class WikidotClient:
             timeout=DEFAULT_REQUEST_TIMEOUT,
             follow_redirects=True,
         )
+
+    @property
+    def forums(self) -> WikidotForumClient:
+        """Forum access shares this client's retrying AMC connection."""
+        return WikidotForumClient(self._amc)
 
     def fetch_page(self, fullname: str) -> WikidotPageData:
         """Retrieve and normalize current data for one Wikidot page.

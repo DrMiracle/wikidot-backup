@@ -1,0 +1,8 @@
+{
+  "status": "ok",
+  "CURRENT_TIMESTAMP": 1790338153,
+  "body": "<div class=\"forum-category-box\">\n\t\t<div class=\"forum-breadcrumbs\">\n\t\t<a href=\"/forum/start\">Forum</a>\n\t\t&raquo;\n\t\tПриховане /\n\t\tВидалені повідомлення\n\t</div>\n\t\n\t<div class=\"description-block well\">\n\t\t<div class=\"statistics\">\n\t\t\tКількість тем: 0<br/>\n\t\t\tКількість повідомлень: 0<br/>\n\t\t\t<span class=\"rss-icon\"><img src=\"https://www.wikidot.com/common--theme/base/images/feed/feed-icon-14x14.png\" alt=\"rss icon\"/></span>\n\t\t\tRSS: <a href=\"/feed/forum/ct-2045113.xml\">Нові теми</a> | <a href=\"/feed/forum/cp-2045113.xml\">Нові статті</a>\n\t\t\n\t\t</div>\n\t\tСміттєпровід\n\t</div>\n\t\n\t\t\t<div class=\"options\">\n\t\t\tСортувати за: <div class=\"btn btn-primary disabled btn-small btn-sm\"><strong>Дата останнього повідомлення</strong></div> <a href=\"/forum/c-2045113/sort/start\" class=\"btn btn-primary btn-small btn-sm\">Дата початку обговорення</a>\n\t\t</div>\t\n\t\t\n\t<div class=\"new-post\">\n\t\t<a href=\"/forum:new-thread/c/2045113\" class=\"btn btn-primary\">Створити нове обговорення</a>\n\t</div>\n\t\n\t\t\t\t\t\n\t\n\t\n\t<table style=\"width: 98%\" class=\"table\">\n\t\t<tr class=\"head\">\n\t\t\t<td>\n\t\t\t\tНазва обговорення\t\t\t</td>\n\t\t\t<td>\n\t\t\t\tСтворено\t\t\t</td>\n\t\t\t<td>\n\t\t\t\tПублікації\t\t\t</td>\n\t\t\t<td>\n\t\t\t\tОстаннє повідомлення\t\t\t</td>\n\t\t</tr>\n\t\t\t</table>\n\t\n\t\t\n</div>",
+  "jsInclude": [],
+  "cssInclude": [],
+  "callbackIndex": null
+}

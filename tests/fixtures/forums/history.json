@@ -1,0 +1,9 @@
+{
+  "status": "ok",
+  "postId": "4569492",
+  "CURRENT_TIMESTAMP": 1790337888,
+  "body": "<a href=\"javascript:;\" onclick=\"WIKIDOT.modules.ForumViewThreadModule.listeners.hideHistory(event, 4569492)\">- Приховати</a>\n\n<div class=\"title\">Редакції коментаря</div>\n<table class=\"table\">\n\t\t\t<tr class=\"active\">\n\t\t\t<td>\n\t\t\t\t<span class=\"printuser\"><a href=\"https://www.wikidot.com/user:info/uther-mcclellan\" onclick=\"WIKIDOT.page.listeners.userInfo(6024623); return false;\" >Uther_McClellan</a></span>\n\t\t\t</td>\n\t\t\t<td>\n\t\t\t\t<span class=\"odate time_1585422445 format_%25e%20%25b%20%25Y%2C%20%25H%3A%25M%7Cagohover\">28 Mar 2020 19:07</span>\n\t\t\t</td>\n\t\t\t<td>\n\t\t\t\t<a href=\"javascript:;\" onclick=\"WIKIDOT.modules.ForumViewThreadModule.listeners.showRevision(event, 5482054)\">Показати правки</a>\n\t\t\t</td>\n\t\t</tr>\n\t\t\t<tr >\n\t\t\t<td>\n\t\t\t\t<span class=\"printuser\"><a href=\"https://www.wikidot.com/user:info/uther-mcclellan\" onclick=\"WIKIDOT.page.listeners.userInfo(6024623); return false;\" >Uther_McClellan</a></span>\n\t\t\t</td>\n\t\t\t<td>\n\t\t\t\t<span class=\"odate time_1585421396 format_%25e%20%25b%20%25Y%2C%20%25H%3A%25M%7Cagohover\">28 Mar 2020 18:49</span>\n\t\t\t</td>\n\t\t\t<td>\n\t\t\t\t<a href=\"javascript:;\" onclick=\"WIKIDOT.modules.ForumViewThreadModule.listeners.showRevision(event, 5482029)\">Показати правки</a>\n\t\t\t</td>\n\t\t</tr>\n\t</table>",
+  "jsInclude": [],
+  "cssInclude": [],
+  "callbackIndex": null
+}

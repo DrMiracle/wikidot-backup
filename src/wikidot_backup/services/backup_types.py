@@ -1,7 +1,30 @@
 """Types defining the public contract of backup services."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol
+from typing import Literal, Protocol
+
+
+@dataclass(frozen=True, slots=True)
+class ForumProgressEvent:
+    """Structured forum progress, independent of terminal rendering."""
+
+    phase: Literal["categories", "threads"]
+    total: int | None
+    completed: int = 0
+    saved: int = 0
+    failed: int = 0
+    item: str = ""
+    message: str | None = None
+
+
+@dataclass(slots=True)
+class ForumBackupResult:
+    """Fetched forum content and discovery coverage reported separately."""
+
+    saved: int = 0
+    skipped: int = 0
+    failed: int = 0
+    warnings: list[str] = field(default_factory=list)
 
 
 class BackupComponent(StrEnum):
@@ -17,6 +40,7 @@ class BackupOptions:
 
     include_revisions: bool = False
     include_files: bool = True
+    include_forums: bool = False
 
     @property
     def required_components(self) -> frozenset[BackupComponent]:
@@ -48,6 +72,7 @@ class SiteBackupResult:
     failed: int
     limited: bool
     resume_state_cleared: bool
+    forums: ForumBackupResult | None = None
 
 
 # Contract for structural subtyping of RichBackupProgress!

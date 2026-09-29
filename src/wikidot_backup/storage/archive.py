@@ -72,6 +72,7 @@ class ArchiveWriter:
 
         Sources are staged as collected. Canonical files are published only
         after the complete iterator finishes, retaining rollback copies.
+        Metadata is written oldest first, ordered by Wikidot revision number.
 
         Args:
             page_id:
@@ -100,6 +101,9 @@ class ArchiveWriter:
 
                 transaction.stage(f"pages/{page_id}/{expected}", source.encode(TEXT_ENCODING))
                 records.append(record)
+
+            # Remote enumeration order varies; make the archive easy to read.
+            records.sort(key=lambda record: record.revision_no)
 
             transaction.stage(
                 f"pages/{page_id}/revisions/revisions.jsonl",

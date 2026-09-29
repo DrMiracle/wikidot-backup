@@ -485,6 +485,10 @@ source
 
 Revision source and metadata should be complete before the page's `REVISIONS` component is marked complete.
 
+Write `revisions.jsonl` in ascending `revision_no` order (oldest first).
+Readers must still accept older newest-first files; use revision numbers and
+IDs rather than line position. Do not automatically rewrite existing archives.
+
 A failed revision crawl may leave partial source files. That is acceptable because the component remains incomplete and will be retried.
 
 ---
@@ -951,7 +955,9 @@ Initial future scope should focus on directly embedded media resources.
 
 ## Forums and discussions
 
-This is the next major feature area after size estimation.
+Public forum HTML backup is implemented by `backup --forums`.
+The separate `backup-forums` command remains available for forum-only retries.
+Raw forum wiki source and authenticated/private forum access remain unsupported.
 
 There are two related sources:
 
@@ -970,12 +976,14 @@ Page discussion
 
 A page discussion is forum-backed, so avoid writing two independent storage/parsing pipelines if the underlying Wikidot object structure is shared.
 
-Proposed archive direction:
+Implemented archive layout (additive to schema version 1):
 
 ```text
 forums/
-├── groups.json
-├── categories.json
+├── catalog.json                   # latest discovery, with run_id
+├── runs/<UTC-timestamp>-<unique-suffix>/
+│   ├── catalog.json               # immutable discovery snapshot for this run
+│   └── report.json                # invocation results, failures, coverage warnings
 └── threads/
     └── <thread_id>/
         ├── thread.json
@@ -983,7 +991,35 @@ forums/
         └── post-revisions.jsonl
 ```
 
-Before implementing persistence, inspect the real `wikidot.py` object graph and pagination behavior.
+Public endpoints and pagination were verified against real responses. Fixture
+responses are under `tests/fixtures/forums/`. Forum integration uses the shared
+retrying AMC layer directly to avoid silent omissions in library pagination.
+
+`backup-forums` unions category listings with discussion IDs in archived pages.
+Post HTML and revision HTML are explicitly labelled as rendered content; never
+pass them through the page-source decoder. Preserve original thread/posts HTML
+in `thread.json.responses`. Post revisions use the response's `content` field,
+not its `body` (which is merely `ok`). `history_position` is derived ordering,
+not a Wikidot revision number. Decode `time_<epoch>` directly as UTC.
+
+New current-post HTML excludes only the outer interface `div.content` wrapper;
+preserve inner formatting and whitespace. Historical wrapped records stay valid
+and are not rewritten automatically. Publish the current catalog and its run
+snapshot in one recovery transaction. Preserve legacy `catalogs/<uuid>.json` and
+`runs/<uuid>.json` files; fall back to the newest legacy catalog if no current
+catalog exists. A run interrupted after discovery may have no `report.json`.
+
+Forum state is independent: `.state/forum-resume.jsonl`. Mark completion after
+the requested thread snapshot transaction commits. Retain old posts/revisions
+absent from newer snapshots; `observed_post_ids` identifies the latest view.
+`--refresh` resets only forum resume state. `--limit` counts unfinished threads;
+discovery still visits every advertised category page, including empty pages.
+Count discrepancies return exit 2 and retain state; remote failures return 1.
+Combined backups finalize the manifest and clear both resume files only after
+pages and forums succeed without coverage warnings. `--limit N` applies to
+pages and threads independently; `--revisions` includes both histories.
+Standalone forum runs never set the manifest's full-backup timestamp. `info` counts
+stored forum data, while `estimate` still excludes it.
 
 Do not add a `FORUM` member to the current page-scoped `BackupComponent` merely for convenience.
 
@@ -1026,6 +1062,12 @@ Use:
 - comments for non-obvious **why**, not obvious line-by-line behavior;
 - keyword-only arguments where they improve call clarity;
 - explicit model conversion functions between layers.
+
+Use descriptive local names such as `post`, `revision`, and `record`, rather
+than `p` or `r`. Group longer functions into readable phases with blank lines,
+short section comments, or focused helpers. Forum modules use role-specific
+names: `forum_client.py`, `forum_records.py`, `forum_threads.py`,
+`forum_backup.py`, and `forum_archive.py`.
 
 Avoid:
 
@@ -1179,7 +1221,7 @@ Archive manifest                    done
 Archive info command                done
 
 Approximate size estimate           done
-Forums + page discussions           next major feature
+Public forums + page discussions    done (rendered HTML; coverage gaps explicit)
 External embedded assets            later
 Link/backlink index                 later
 Human-readable export               later

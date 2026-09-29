@@ -67,3 +67,5 @@ desktop.ini
 src/temp/
 pages.txt
 listpages_debug.html
+/tools
+/diagnostics

@@ -11,6 +11,7 @@ from wikidot_backup.models.file import PageFilesRecord
 from wikidot_backup.models.page import PageRecord
 from wikidot_backup.models.revision import PageRevisionRecord
 from wikidot_backup.storage.atomic import archive_path, require_settled_archive
+from wikidot_backup.storage.forum_archive import ForumState, read_thread
 from wikidot_backup.storage.state import load_page_states
 
 
@@ -37,6 +38,11 @@ class ArchiveInfo:
     indexes_bytes: int
     state_bytes: int
     total_bytes: int
+    forum_threads: int = 0
+    forum_posts: int = 0
+    forum_revisions: int = 0
+    forum_resume_threads: int = 0
+    forums_bytes: int = 0
 
 
 def inspect_archive(
@@ -48,6 +54,15 @@ def inspect_archive(
             f"Archive directory not found: {root}"
         )
     require_settled_archive(root)
+    forum_threads = forum_posts = forum_revisions = 0
+    for path in (root / "forums" / "threads").glob("*/thread.json"):
+        if not path.parent.name.isdecimal():
+            raise RuntimeError(f"Invalid forum thread directory: {path.parent}")
+        _, posts, history = read_thread(root, int(path.parent.name))
+        forum_threads += 1
+        forum_posts += len(posts)
+        forum_revisions += len(history)
+    forum_state = ForumState(root)
 
     pages_dir = root / "pages"
     blobs_dir = root / "blobs" / "sha256"
@@ -163,6 +178,11 @@ def inspect_archive(
             root / ".state"
         ),
         total_bytes=_directory_size(root),
+        forum_threads=forum_threads,
+        forum_posts=forum_posts,
+        forum_revisions=forum_revisions,
+        forum_resume_threads=len(forum_state.completed),
+        forums_bytes=_directory_size(root / "forums"),
     )
 
 

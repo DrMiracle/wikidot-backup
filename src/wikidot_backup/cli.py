@@ -10,15 +10,18 @@ from rich.table import Table
 
 from wikidot_backup.config import DEFAULT_OUTPUT_DIR
 from wikidot_backup.services.backup import backup_site
-from wikidot_backup.services.backup_types import BackupOptions
+from wikidot_backup.services.backup_types import BackupOptions, ForumBackupResult
 from wikidot_backup.services.estimate import estimate_backup
+from wikidot_backup.services.forum_backup import backup_forums
 from wikidot_backup.storage.inspection import inspect_archive
 from wikidot_backup.storage.manifest import ArchiveManifestStore
+from wikidot_backup.ui.help import BackupCommandGroup
 from wikidot_backup.ui.progress import RichBackupProgress
 from wikidot_backup.util.formatting import format_bytes
 from wikidot_backup.wikidot.client import WikidotClient
 
 app = typer.Typer(
+    cls=BackupCommandGroup,
     no_args_is_help=True,
     help="Create portable backups of Wikidot sites.",
 )
@@ -28,6 +31,57 @@ console = Console()
 @app.callback()
 def main() -> None:
     """Backup and archival tools for Wikidot sites."""
+
+
+@app.command("backup-forums")
+def forums(
+    site: Annotated[str, typer.Argument(help="Wikidot site unix name.")],
+    output: Annotated[Path, typer.Option("--output", "-o")] = Path(DEFAULT_OUTPUT_DIR),
+    limit: Annotated[int | None, typer.Option("--limit", min=1)] = None,
+    revisions: Annotated[bool, typer.Option("--revisions")] = False,
+    refresh: Annotated[
+        bool, typer.Option("--refresh", help="Ignore previous forum completion state.")
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Log each discovered category and saved thread.")
+    ] = False,
+) -> None:
+    """Back up public forum threads and discussions referenced by archived pages."""
+    client = None
+    try:
+        client = WikidotClient(site)
+        with RichBackupProgress(console=console, verbose=verbose) as progress:
+            result = backup_forums(
+                client, output, revisions=revisions, limit=limit, refresh=refresh,
+                report=progress.forum_event,
+            )
+    except KeyboardInterrupt:
+        console.print("Forum backup interrupted; completion state retained.")
+        raise typer.Exit(code=130) from None
+    finally:
+        if client is not None:
+            client.close()
+    exit_code = _report_forum_result(result, output)
+    if exit_code:
+        raise typer.Exit(code=exit_code)
+    if limit is not None:
+        console.print("Batch complete; run without --limit to finalize.")
+
+
+def _report_forum_result(result: ForumBackupResult, output: Path) -> int:
+    """Present forum results consistently for standalone and combined backups."""
+    console.print(
+        f"Threads: {result.saved} saved, {result.skipped} resumed, {result.failed} failed."
+    )
+    for warning in result.warnings:
+        console.print(f"Coverage warning: {warning}", markup=False)
+    if result.failed:
+        console.print(f"Failure details: {output / 'forums' / 'runs'}", markup=False)
+        return 1
+    if result.warnings:
+        console.print("Coverage is incomplete or uncertain; forum resume state retained.")
+        return 2
+    return 0
 
 
 @app.command()
@@ -52,7 +106,7 @@ def backup(
             "--limit",
             min=1,
             help=(
-                "Process at most this many unfinished pages. "
+                "Process at most this many unfinished pages and, with --forums, threads. "
                 "Useful for development and testing."
             ),
         ),
@@ -61,7 +115,7 @@ def backup(
         bool,
         typer.Option(
             "--revisions",
-            help="Include complete page revision history.",
+            help="Include page revision history and, with --forums, post history.",
         ),
     ] = False,
 
@@ -72,6 +126,13 @@ def backup(
             help="Download page attachments.",
         ),
     ] = True,
+    forums: Annotated[
+        bool,
+        typer.Option("--forums", help="Include public forums and page discussions."),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Log every saved page and thread.")
+    ] = False,
 ) -> None:
     """Back up current page content from a Wikidot site.
 
@@ -85,16 +146,18 @@ def backup(
     try:
         client = WikidotClient(site)
 
-        with RichBackupProgress() as progress:
+        with RichBackupProgress(console=console, verbose=verbose) as progress:
             result = backup_site(
                 client,
                 output,
                 options=BackupOptions(
                     include_revisions=revisions,
                     include_files=files,
+                    include_forums=forums,
                 ),
                 limit=limit,
                 progress=progress,
+                forum_report=progress.forum_event,
             )
 
     except KeyboardInterrupt:
@@ -124,7 +187,7 @@ def backup(
         )
     elif result.limited:
         console.print(
-            "[green]Current batch completed successfully.[/green] "
+            "[green]Page batch completed successfully.[/green] "
             "Resume state retained; run without --limit to finalize the backup."
         )
     else:
@@ -136,8 +199,13 @@ def backup(
     console.print(
         f"Saved this run: {result.saved}"
     )
+    forum_exit_code = (
+        _report_forum_result(result.forums, output) if result.forums is not None else 0
+    )
     if result.failed:
         raise typer.Exit(code=1)
+    if forum_exit_code:
+        raise typer.Exit(code=forum_exit_code)
 
 @app.command()
 def info(
@@ -229,6 +297,12 @@ def info(
     )
 
     table.add_section()
+
+    table.add_row("Forum threads", str(statistics.forum_threads))
+    table.add_row("Forum posts (including retained posts)", str(statistics.forum_posts))
+    table.add_row("Forum post revisions", str(statistics.forum_revisions))
+    table.add_row("Forum resume threads", str(statistics.forum_resume_threads))
+    table.add_row("Forum data", format_bytes(statistics.forums_bytes))
 
     table.add_row(
         "Page data",

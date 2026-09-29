@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import TracebackType
 
+from rich.console import Console
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -15,6 +16,8 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from wikidot_backup.services.backup_types import ForumProgressEvent
+
 
 class RichBackupProgress:
     """Display site backup progress using Rich.
@@ -24,7 +27,7 @@ class RichBackupProgress:
     prevents interrupted pages from appearing completed.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, console: Console | None = None, verbose: bool = False) -> None:
         """Create the Rich progress display."""
 
         self._progress = Progress(
@@ -39,7 +42,7 @@ class RichBackupProgress:
             MofNCompleteColumn(),
 
             TextColumn(
-                "• [cyan]{task.fields[current_page]}"
+                "• {task.fields[current_page]}", markup=False,
             ),
 
             TextColumn(
@@ -52,9 +55,12 @@ class RichBackupProgress:
 
             TimeElapsedColumn(),
             TimeRemainingColumn(),
+            console=console,
         )
 
         self._task_id: TaskID | None = None
+        self._verbose = verbose
+        self._forum_phase: str | None = None
 
     def __enter__(self) -> RichBackupProgress:
         """Start rendering the Rich progress display."""
@@ -136,6 +142,8 @@ class RichBackupProgress:
             saved=saved,
             failed=failed,
         )
+        if self._verbose:
+            self._progress.console.print(f"Saved page: {fullname}", markup=False, highlight=False)
 
     def page_failed(
         self,
@@ -152,8 +160,8 @@ class RichBackupProgress:
         # console.print integrates with the live progress display without
         # corrupting the progress bar output.
         self._progress.console.print(
-            f"[red]Failed page:[/red] {fullname} "
-            f"({type(exception).__name__}: {exception})"
+            f"Failed page: {fullname} "
+            f"({type(exception).__name__}: {exception})", markup=False, highlight=False,
         )
 
         self._progress.update(
@@ -180,6 +188,29 @@ class RichBackupProgress:
             saved=saved,
             failed=failed,
         )
+        self._progress.stop()
+
+    def forum_event(self, event: ForumProgressEvent) -> None:
+        """Render each forum phase through the same console and live display."""
+        if event.phase != self._forum_phase:
+            self._progress.stop()
+            if self._task_id is not None:
+                self._progress.remove_task(self._task_id)
+            self._forum_phase = event.phase
+            self._task_id = self._progress.add_task(
+                "Forum categories" if event.phase == "categories" else "Threads",
+                total=event.total, current_page="fetching", saved=0, failed=0,
+            )
+            self._progress.start()
+
+        finished = event.total is not None and event.completed == event.total
+        self._progress.update(
+            self._require_task(), total=event.total, completed=event.completed,
+            current_page="done" if finished else event.item or "fetching",
+            saved=event.saved, failed=event.failed,
+        )
+        if self._verbose and event.message:
+            self._progress.console.print(event.message, markup=False, highlight=False)
 
     def _require_task(self) -> TaskID:
         """Return the active task ID or fail on incorrect reporter usage."""

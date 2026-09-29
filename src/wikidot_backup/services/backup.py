@@ -1,6 +1,7 @@
 """Site-wide Wikidot backup orchestration."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from wikidot_backup.collectors.files import collect_page_files
@@ -11,10 +12,13 @@ from wikidot_backup.services.backup_types import (
     BackupComponent,
     BackupOptions,
     BackupProgressReporter,
+    ForumProgressEvent,
     SiteBackupResult,
 )
+from wikidot_backup.services.forum_backup import backup_forums
 from wikidot_backup.storage.archive import ArchiveWriter
 from wikidot_backup.storage.atomic import recover_archive_writes
+from wikidot_backup.storage.forum_archive import ForumState
 from wikidot_backup.storage.indexes import rebuild_page_indexes
 from wikidot_backup.storage.manifest import ArchiveManifestStore
 from wikidot_backup.storage.state import BackupState, PageBackupState
@@ -29,6 +33,7 @@ def backup_site(
         options: BackupOptions,
         limit: int | None = None,
         progress: BackupProgressReporter | None = None,
+        forum_report: Callable[[ForumProgressEvent], None] | None = None,
 ) -> SiteBackupResult:
     """Archive current versions of pages from an entire Wikidot site.
 
@@ -276,26 +281,38 @@ def backup_site(
     # including pages completed during earlier resumed runs.
     rebuild_page_indexes(output)
 
+    if progress is not None:
+        progress.end(saved=saved, failed=failed)
+
+    # Forums share site-level success, but use thread-level resume state.
+    forum_result = None
+    if options.include_forums:
+        forum_result = backup_forums(
+            client, output, revisions=options.include_revisions, limit=limit,
+            report=forum_report, finalize=False,
+        )
+
+    forums_succeeded = forum_result is None or (
+        forum_result.failed == 0 and not forum_result.warnings
+    )
     resume_state_cleared = False
-    if failed == 0:
+    if failed == 0 and forums_succeeded:
+        components = [component.value for component in options.required_components]
+        if options.include_forums:
+            components.append("forums")
+            if options.include_revisions:
+                components.append("forum_revisions")
+
         manifest_store.record_success(
-            components=[
-                component.value
-                for component
-                in options.required_components
-            ],
+            components=components,
             full_backup=not limited_run,
         )
 
         if not limited_run:
             state.clear_resume_state()
+            if options.include_forums:
+                ForumState(output).clear()
             resume_state_cleared = True
-
-    if progress is not None:
-        progress.end(
-            saved=saved,
-            failed=failed,
-        )
 
     return SiteBackupResult(
         discovered=discovered_count,
@@ -305,6 +322,7 @@ def backup_site(
         failed=failed,
         limited=limited_run,
         resume_state_cleared=resume_state_cleared,
+        forums=forum_result,
     )
 
 

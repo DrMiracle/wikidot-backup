@@ -1,0 +1,9 @@
+{
+  "status": "ok",
+  "postId": "4570884",
+  "CURRENT_TIMESTAMP": 1790337888,
+  "body": "<a href=\"javascript:;\" onclick=\"WIKIDOT.modules.ForumViewThreadModule.listeners.hideHistory(event, 4570884)\">- Приховати</a>\n\n<div class=\"title\">Редакції коментаря</div>\n<table class=\"table\">\n\t\t\t<tr class=\"active\">\n\t\t\t<td>\n\t\t\t\t<span class=\"printuser\"><a href=\"https://www.wikidot.com/user:info/murzei-chaos\" onclick=\"WIKIDOT.page.listeners.userInfo(2815284); return false;\" >murzei_chaos</a></span>\n\t\t\t</td>\n\t\t\t<td>\n\t\t\t\t<span class=\"odate time_1585504947 format_%25e%20%25b%20%25Y%2C%20%25H%3A%25M%7Cagohover\">29 Mar 2020 18:02</span>\n\t\t\t</td>\n\t\t\t<td>\n\t\t\t\t<a href=\"javascript:;\" onclick=\"WIKIDOT.modules.ForumViewThreadModule.listeners.showRevision(event, 5483816)\">Показати правки</a>\n\t\t\t</td>\n\t\t</tr>\n\t</table>",
+  "jsInclude": [],
+  "cssInclude": [],
+  "callbackIndex": null
+}
