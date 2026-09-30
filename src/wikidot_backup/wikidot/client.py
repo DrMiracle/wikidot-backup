@@ -1,6 +1,7 @@
 """Normalize Wikidot objects and isolate network operations from archive models."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -219,7 +220,7 @@ class WikidotClient:
             result["body"]
         )
 
-    def list_page_fullnames(self) -> list[str]:
+    def list_page_fullnames(self, *, report: Callable[[int], None] | None = None) -> list[str]:
         """Return fullnames of every page on the Wikidot site.
 
         ListPagesModule is queried page by page until no new page names
@@ -254,6 +255,8 @@ class WikidotClient:
 
             fullnames.extend(new_fullnames)
             seen.update(new_fullnames)
+            if report is not None:
+                report(len(fullnames))
 
             if len(batch) < LIST_PAGES_PER_PAGE:
                 break

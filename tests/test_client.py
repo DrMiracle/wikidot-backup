@@ -39,7 +39,9 @@ def test_discovery_paginates_with_offsets(raw_client):
         {"body": f'<div class="list-pages-box">{first}</div>'},
         {"body": '<div class="list-pages-box">last<div class="pager">1 2 next</div></div>'},
     ]
-    assert len(raw_client.list_page_fullnames()) == 251
+    counts = []
+    assert len(raw_client.list_page_fullnames(report=counts.append)) == 251
+    assert counts == [250, 251]
     requests = raw_client._amc.request.call_args_list
     assert [call.kwargs["offset"] for call in requests] == ["0", "250"]
     assert all(

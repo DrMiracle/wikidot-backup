@@ -61,6 +61,7 @@ class RichBackupProgress:
         self._task_id: TaskID | None = None
         self._verbose = verbose
         self._forum_phase: str | None = None
+        self._validation_fullname: str | None = None
 
     def __enter__(self) -> RichBackupProgress:
         """Start rendering the Rich progress display."""
@@ -80,9 +81,47 @@ class RichBackupProgress:
 
     def discovery_started(self) -> None:
         """Report that Wikidot page discovery has started."""
-        self._progress.console.print(
-            "[cyan]Fetching page list...[/cyan]"
+        self._start_preparation("Fetching page list", total=None)
+
+    def discovery_advanced(self, discovered: int) -> None:
+        """Update after each ListPages response, rather than leaving a static message."""
+        self._progress.update(
+            self._require_task(), completed=discovered, current_page=f"{discovered} found",
         )
+
+    def resume_loading(self) -> None:
+        """Show when the local completion journal is being read."""
+        self._progress.stop()
+        if self._task_id is not None:
+            self._progress.remove_task(self._task_id)
+            self._task_id = None
+        self._progress.console.print("Reading resume state...", markup=False, highlight=False)
+
+    def resume_validation(self, *, total: int, completed: int, fullname: str) -> None:
+        """Keep the current network lookup visible, including while waiting for retries."""
+        if not fullname:
+            self._start_preparation("Checking saved page IDs", total=total)
+            self._validation_fullname = None
+        self._progress.update(
+            self._require_task(), completed=completed,
+            current_page="done" if completed == total else fullname or "starting",
+        )
+        if fullname and fullname != self._validation_fullname:
+            if self._verbose:
+                self._progress.console.print(
+                    f"Checking saved page ID: {fullname}", markup=False, highlight=False,
+                )
+            self._validation_fullname = fullname
+
+    def _start_preparation(self, description: str, *, total: int | None) -> None:
+        """Replace the previous phase so its counters cannot look stuck."""
+        self._progress.stop()
+        if self._task_id is not None:
+            self._progress.remove_task(self._task_id)
+        self._task_id = self._progress.add_task(
+            description, total=total, current_page="waiting", saved=0, failed=0,
+        )
+        self._progress.start()
 
     def begin(
         self,
@@ -93,6 +132,9 @@ class RichBackupProgress:
     ) -> None:
         """Initialize a progress task for the current backup run."""
 
+        self._progress.stop()
+        if self._task_id is not None:
+            self._progress.remove_task(self._task_id)
         self._progress.console.print(
             f"Discovered: [bold]{discovered}[/bold]  "
             f"Already completed: [bold]{already_completed}[/bold]  "
@@ -106,6 +148,7 @@ class RichBackupProgress:
             saved=0,
             failed=0,
         )
+        self._progress.start()
 
     def page_started(
         self,

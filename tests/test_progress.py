@@ -9,6 +9,33 @@ from wikidot_backup.services.backup_types import ForumProgressEvent
 from wikidot_backup.ui.progress import RichBackupProgress
 
 
+def test_preparation_phases_are_visible_before_page_collection():
+    output = StringIO()
+    console = Console(file=output, force_terminal=False, width=160)
+    with RichBackupProgress(console=console, verbose=True) as progress:
+        progress.discovery_started()
+        progress.discovery_advanced(250)
+        assert progress._progress.tasks[0].completed == 250
+        progress.resume_loading()
+        assert not progress._progress.live.is_started
+        assert not progress._progress.tasks
+        assert output.getvalue().splitlines()[-1] == "Reading resume state..."
+        progress.resume_validation(total=1, completed=0, fullname="")
+        progress.resume_validation(total=1, completed=0, fullname="saved-page")
+        assert progress._progress.tasks[0].completed == 0
+        assert progress._progress.tasks[0].fields["current_page"] == "saved-page"
+        progress.resume_validation(total=1, completed=1, fullname="saved-page")
+        progress.begin(discovered=250, already_completed=1, pending=249)
+        assert len(progress._progress.tasks) == 1
+        assert progress._progress.tasks[0].description == "Pages"
+
+    text = output.getvalue()
+    assert "Fetching page list" in text
+    assert "Reading resume state" in text
+    assert "Checking saved page IDs" in text
+    assert text.count("Checking saved page ID: saved-page") == 1
+
+
 @pytest.mark.parametrize("verbose", [False, True])
 def test_page_to_forum_transition_uses_one_live_console(verbose):
     output = StringIO()

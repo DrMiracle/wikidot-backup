@@ -98,18 +98,35 @@ def backup_site(
 
     # Enumeration must succeed completely before any page collection begins.
     # Otherwise a partial page list could be mistaken for a full-site backup.
-    fullnames = client.list_page_fullnames()
+    fullnames = client.list_page_fullnames(
+        report=progress.discovery_advanced if progress is not None else None,
+    )
     discovered_count = len(fullnames)
 
+    if progress is not None:
+        progress.resume_loading()
     page_states = state.load_page_states()
     required_components = options.required_components
 
     # A reused fullname must not hide a replacement page behind completed state.
-    for fullname in fullnames:
-        completed = page_states.get(fullname)
-        if _is_page_complete(completed, required_components):
-            assert completed is not None and completed.page_id is not None
-            client.validate_page_identity(fullname, completed.page_id)
+    completed_fullnames = [
+        fullname for fullname in fullnames
+        if _is_page_complete(page_states.get(fullname), required_components)
+    ]
+    if progress is not None:
+        progress.resume_validation(total=len(completed_fullnames), completed=0, fullname="")
+    for checked, fullname in enumerate(completed_fullnames):
+        completed = page_states[fullname]
+        assert completed.page_id is not None
+        if progress is not None:
+            progress.resume_validation(
+                total=len(completed_fullnames), completed=checked, fullname=fullname,
+            )
+        client.validate_page_identity(fullname, completed.page_id)
+        if progress is not None:
+            progress.resume_validation(
+                total=len(completed_fullnames), completed=checked + 1, fullname=fullname,
+            )
 
     pending_all = [
         fullname

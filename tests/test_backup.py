@@ -62,6 +62,41 @@ def test_unlimited_resume_finalizes_without_recollecting(client, tmp_path):
     assert not (tmp_path / ".state/resume.jsonl").exists()
 
 
+def test_resume_reports_identity_lookup_before_request_and_advances_after(client, tmp_path):
+    backup_site(client, tmp_path, options=BackupOptions(), limit=20)
+    client.fetch_page.reset_mock()
+    progress = Mock()
+
+    def check_identity(fullname, page_id):
+        progress.resume_validation.assert_called_with(
+            total=1, completed=0, fullname="test-page",
+        )
+        progress.begin.assert_not_called()
+
+    client.validate_page_identity.side_effect = check_identity
+    result = backup_site(client, tmp_path, options=BackupOptions(), progress=progress)
+
+    progress.resume_loading.assert_called_once()
+    progress.resume_validation.assert_called_with(total=1, completed=1, fullname="test-page")
+    assert result.saved == 0 and result.already_completed == 1
+    client.fetch_page.assert_not_called()
+
+
+def test_interrupted_identity_check_keeps_resume_state(client, tmp_path):
+    backup_site(client, tmp_path, options=BackupOptions(), limit=20)
+    path = tmp_path / ".state/resume.jsonl"
+    original = path.read_bytes()
+    client.validate_page_identity.side_effect = KeyboardInterrupt
+    progress = Mock()
+
+    with pytest.raises(KeyboardInterrupt):
+        backup_site(client, tmp_path, options=BackupOptions(), progress=progress)
+
+    assert path.read_bytes() == original
+    progress.resume_validation.assert_called_with(total=1, completed=0, fullname="test-page")
+    progress.begin.assert_not_called()
+
+
 def test_component_failure_retries_only_unfinished_component(client, tmp_path):
     client.fetch_page_files.side_effect = httpx.ReadTimeout("offline")
     progress = Mock()

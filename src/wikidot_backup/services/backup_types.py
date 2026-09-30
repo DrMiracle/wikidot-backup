@@ -93,6 +93,18 @@ class BackupProgressReporter(Protocol):
         """Report that Wikidot page discovery has started."""
         ...
 
+    def discovery_advanced(self, discovered: int) -> None:
+        """Report names collected after each remote discovery batch."""
+        ...
+
+    def resume_loading(self) -> None:
+        """Distinguish local state loading from remote discovery and validation."""
+        ...
+
+    def resume_validation(self, *, total: int, completed: int, fullname: str) -> None:
+        """Report network identity checks before completed pages can be skipped."""
+        ...
+
     def page_started(
             self,
             *,

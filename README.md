@@ -174,6 +174,15 @@ last full-backup timestamp, even if it processes all remaining pages. Run
 without `--limit` to finalize the crawl. Failed page collections return exit
 code 1; an interrupted backup returns 130.
 
+Resuming first discovers the current page list, reads the local resume file,
+and checks each completed page's ID against Wikidot before skipping it. These
+identity checks protect against a deleted page's name being reused by a different
+page. They make network requests, so resuming thousands of pages can take time;
+they do not re-download completed sources, attachments or revision histories.
+Progress shows these as separate phases, including `Checking saved page IDs`.
+`--verbose` also prints the page name before each check. If a request is slow or
+retrying, the counter stays on that page until it succeeds or raises an error.
+
 Options can be combined:
 
 ```powershell
