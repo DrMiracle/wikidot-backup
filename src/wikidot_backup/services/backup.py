@@ -115,6 +115,7 @@ def backup_site(
     ]
     if progress is not None:
         progress.resume_validation(total=len(completed_fullnames), completed=0, fullname="")
+    validation_failures: dict[str, Exception] = {}
     for checked, fullname in enumerate(completed_fullnames):
         completed = page_states[fullname]
         assert completed.page_id is not None
@@ -122,7 +123,15 @@ def backup_site(
             progress.resume_validation(
                 total=len(completed_fullnames), completed=checked, fullname=fullname,
             )
-        client.validate_page_identity(fullname, completed.page_id)
+        try:
+            client.validate_page_identity(fullname, completed.page_id)
+        except PAGE_COLLECTION_ERRORS as exc:
+            if isinstance(exc, WikidotResourceError):
+                # Identity conflicts must not be treated as completed resume entries.
+                raise
+            # Process remote lookup failures through the normal page error path.
+            # Keep stored completion records, but do not claim this page was verified.
+            validation_failures[fullname] = exc
         if progress is not None:
             progress.resume_validation(
                 total=len(completed_fullnames), completed=checked + 1, fullname=fullname,
@@ -131,7 +140,7 @@ def backup_site(
     pending_all = [
         fullname
         for fullname in fullnames
-        if not _is_page_complete(
+        if fullname in validation_failures or not _is_page_complete(
             page_states.get(fullname),
             required_components,
         )
@@ -174,6 +183,8 @@ def backup_site(
         )
 
         try:
+            if fullname in validation_failures:
+                raise validation_failures[fullname]
             if page_state.page_id is not None:
                 client.validate_page_identity(fullname, page_state.page_id)
             if BackupComponent.PAGE not in page_state.completed_components:

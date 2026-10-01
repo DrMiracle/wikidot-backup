@@ -12,6 +12,7 @@ from wikidot_backup.config import DEFAULT_OUTPUT_DIR
 from wikidot_backup.services.backup import backup_site
 from wikidot_backup.services.backup_types import BackupOptions, ForumBackupResult
 from wikidot_backup.services.estimate import estimate_backup
+from wikidot_backup.services.export import export_archive
 from wikidot_backup.services.forum_backup import backup_forums
 from wikidot_backup.storage.inspection import inspect_archive
 from wikidot_backup.storage.manifest import ArchiveManifestStore
@@ -82,6 +83,45 @@ def _report_forum_result(result: ForumBackupResult, output: Path) -> int:
         console.print("Coverage is incomplete or uncertain; forum resume state retained.")
         return 2
     return 0
+
+
+@app.command("export")
+def export_command(
+    archive: Annotated[Path, typer.Argument(help="Existing canonical backup directory.")],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="New export directory, outside the backup.")
+    ] = Path("export"),
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Log each exported item.")
+    ] = False,
+) -> None:
+    """Create an offline readable view with named files, revisions and discussions."""
+    try:
+        with console.status("Exporting archived content..."):
+            result = export_archive(
+                archive,
+                output,
+                report=(lambda message: console.print(message, markup=False)) if verbose else None,
+            )
+    except KeyboardInterrupt:
+        console.print("Export interrupted. Choose a new output directory when retrying.")
+        raise typer.Exit(code=130) from None
+    except (OSError, ValueError, RuntimeError) as exc:
+        console.print(f"Export failed: {exc}", markup=False)
+        raise typer.Exit(code=1) from None
+
+    console.print(
+        f"Exported {len(result['pages'])} pages and "
+        f"{len(result['standalone_threads'])} standalone forum threads."
+    )
+    console.print(f"Open {output.resolve() / 'index.html'}", markup=False)
+    if result["warning_count"]:
+        console.print(
+            f"{result['warning_count']} warning(s), including any missing content. "
+            f"See {output / 'export.json'} and each page's export-status.json.",
+            markup=False,
+        )
+        raise typer.Exit(code=2)
 
 
 @app.command()

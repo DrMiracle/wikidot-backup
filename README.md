@@ -13,6 +13,7 @@ disaster recovery or migration to another wiki engine.
 - page attachments and attachment metadata;
 - optional complete page revision history;
 - public forum threads and page discussions, with optional rendered post revisions;
+- offline human-readable export with named attachments, revision history, and discussions;
 - revision authors, timestamps, comments, and historical source;
 - content-addressed attachment storage with SHA-256 integrity hashes;
 - resumable component-aware backup runs;
@@ -297,6 +298,45 @@ Archive content is inspected directly from the filesystem, so these counts
 describe what is actually stored in the backup rather than the current state
 of the Wikidot site.
 
+### Exporting a readable copy
+
+```powershell
+wikidot-backup export ./backup --output ./export
+```
+
+Open `export/index.html` to browse pages and discussions. Export runs offline and
+leaves the backup unchanged. Choose a new output directory outside the backup;
+existing output directories are never overwritten. Add `--verbose` to list each
+page and standalone thread as it is exported.
+
+Open that file directly from Windows File Explorer in your browser. No localhost
+server is required; a temporary editor preview URL may stop working later.
+Source links open UTF-8 HTML viewers so Ukrainian text displays correctly;
+the original `source.txt` and revision text files remain unchanged.
+
+Export does not currently resume or update an existing export. After updating
+your backup, generate another snapshot with a new output directory, for example
+`wikidot-backup export ./backup --output ./export-updated`. This reads local
+files only and does not download the site again.
+
+Each page directory contains original wiki source, metadata, named attachments,
+revision history if archived, and its discussion if available. Source remains
+wiki markup; this is not a complete Wikidot page renderer. Discussion HTML keeps
+basic formatting and reply links, disables scripts, and shows remote images as
+links. Original post HTML remains available in the JSON records.
+
+Attachments are copied byte-for-byte, with their original extensions. Names that
+are invalid on Windows or collide are adjusted; exported `files.json` maps each
+original name to its exported path and retains the original archive metadata.
+Revision source paths in exported records are relative to the page directory.
+
+Missing content produces warnings in `export.json` and each page's
+`export-status.json`, and exit code 2. If `files.json` was never archived, the
+attachment list is unknown; export cannot recover filenames from orphaned blobs.
+Malformed metadata or failed integrity checks stop export with exit code 1.
+Interrupted or failed output remains marked incomplete; retry into a new directory.
+Do not export while another process is writing the backup.
+
 ## Archive layout
 
 Pages are stored by their stable numeric Wikidot page ID. Human-readable
@@ -350,28 +390,39 @@ category and page links; `posts.jsonl` holds the comments, their authors and rep
 relationships. Both are needed to reconstruct the discussion. Post revisions
 are earlier versions of individual comments, not additional discussions.
 
-These are canonical archive records, not the final browsing interface. An export
-can follow `page.json.discussion_thread_id` to the matching forum directory and
-render its posts as nested comments. The intended readable layout is:
+The export command follows `page.json.discussion_thread_id` to place discussions
+beside their pages. Its readable layout is:
 
 ```text
 export/
+├── index.html
+├── export.json
 ├── pages/
 │   └── scp-182-ua/
+│       ├── index.html
 │       ├── page.json
 │       ├── source.txt
+│       ├── export-status.json
+│       ├── files.json
 │       ├── files/<original-filename>
-│       ├── comments.html
-│       └── comments.json
+│       ├── revisions/
+│       │   ├── index.html
+│       │   ├── revisions.jsonl
+│       │   └── sources/<revision-number>-<revision-id>.txt
+│       └── discussion/
+│           ├── index.html
+│           ├── thread.json
+│           ├── posts.jsonl
+│           └── post-revisions.jsonl
 └── forums/
-    └── <category>/<thread-name>/discussion.html
+    └── <thread-name>/              # same files as discussion/
 ```
 
-This export is planned, not implemented. General forum topics belong under
-`export/forums/`; page discussions appear beside their pages. An exporter should
-use `observed_post_ids` and `parent_id` to reconstruct the latest discussion,
-and label retained older posts separately. It should render the structured post
-records, not replay the raw AMC interface HTML from `thread.json.responses`.
+Threads without an exported page belong under `export/forums/`, including
+discussions of deleted pages. Export uses `observed_post_ids` and `parent_id`
+to show the latest discussion and reply links, and labels retained older posts
+separately. It renders structured post records rather than replaying the raw
+AMC interface HTML from `thread.json.responses`.
 Raw responses preserve evidence and metadata; catalogs and run reports support
 recovery and coverage auditing. None requires changing the numeric canonical
 paths or duplicating comments in the working archive.
@@ -456,7 +507,7 @@ no `.jpg` extension.
 Content-addressed storage avoids keeping duplicate copies when identical
 binary content is referenced more than once.
 
-A future export/restore command can reconstruct a human-readable directory
+The export command reconstructs a human-readable directory
 tree using the original filenames without modifying the archived data.
 
 ### `revisions/`
@@ -552,6 +603,7 @@ src/
     ├── services/
     │   ├── backup.py
     │   ├── backup_types.py
+    │   ├── export.py
     │   ├── forum_backup.py
     │   └── estimate.py
     │
@@ -565,9 +617,12 @@ src/
     │   └── state.py
     │
     ├── ui/
+    │   ├── export_html.py
+    │   ├── help.py
     │   └── progress.py
     │
     └── util/
+        ├── export_names.py
         ├── formatting.py
         └── hashing.py
 ```
@@ -579,7 +634,7 @@ The main responsibilities are:
 - `models/` — schemas for data stored in the archive;
 - `services/` — backup workflow orchestration;
 - `storage/` — archive writing, manifest handling, indexes, inspection, and resume state;
-- `ui/` — terminal progress reporting;
+- `ui/` — terminal reporting and offline export HTML;
 - `util/` — small shared utilities such as hashing and output formatting.
 
 ## Reliability

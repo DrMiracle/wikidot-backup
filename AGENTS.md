@@ -812,7 +812,7 @@ They should not become the source of truth.
 
 Do **not** duplicate all files into human-readable directories inside the canonical archive.
 
-A future export command should materialize a readable view, e.g.:
+`wikidot-backup export ./backup --output ./export` materializes a readable view, e.g.:
 
 ```text
 export/
@@ -828,7 +828,13 @@ Use page `fullname`, not title, as the default exported directory name.
 
 Export should reconstruct original attachment filenames by copying blob bytes. No image conversion is required.
 
-This feature is planned after forums/external-asset work.
+Export runs offline into a new directory outside the archive. It adds HTML
+navigation, revision history, and linked `discussion/` records. Unlinked threads
+go under `export/forums/`. Windows-unsafe or colliding names are adjusted with
+original names retained in metadata. Missing content generates explicit warnings;
+absent attachment metadata means the filenames and count are unknown. Verify
+hashes before copying content. Sanitized discussion HTML must not execute archived
+scripts or automatically load remote media; preserve original HTML in JSON.
 
 ---
 
@@ -1224,7 +1230,7 @@ Approximate size estimate           done
 Public forums + page discussions    done (rendered HTML; coverage gaps explicit)
 External embedded assets            later
 Link/backlink index                 later
-Human-readable export               later
+Human-readable export               done (offline directories and HTML navigation)
 Archive verification                later
 Optional packed/cold-storage copy   later
 ```

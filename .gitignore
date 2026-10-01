@@ -45,6 +45,7 @@ backup/
 backups/
 archive/
 output/
+export/
 
 # Runtime state
 

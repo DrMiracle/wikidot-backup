@@ -2,6 +2,7 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+from wikidot.common.exceptions import ForbiddenException
 
 from wikidot_backup.services.backup import backup_site
 from wikidot_backup.services.backup_types import BackupComponent, BackupOptions
@@ -139,6 +140,32 @@ def test_completed_resume_does_not_hide_replacement_page(client, tmp_path):
         backup_site(client, tmp_path, options=BackupOptions())
     assert (tmp_path / ".state/resume.jsonl").is_file()
     assert ArchiveManifestStore(tmp_path).load().last_full_backup_at is None
+
+
+@pytest.mark.parametrize("error", [ForbiddenException("not_ok"), httpx.ReadTimeout("offline")])
+def test_resume_lookup_failure_continues_and_is_rechecked(client, tmp_path, page_data, error):
+    backup_site(client, tmp_path, options=BackupOptions(), limit=1)
+    original_source = (tmp_path / "pages/123/source.txt").read_bytes()
+    client.list_page_fullnames.return_value = ["test-page", "new-page"]
+    client.fetch_page.return_value = page_data(fullname="new-page", page_id=456)
+    client.validate_page_identity.side_effect = error
+    progress = Mock()
+
+    result = backup_site(client, tmp_path, options=BackupOptions(), progress=progress)
+
+    assert result.failed == 1 and result.saved == 1 and result.processed == 2
+    assert result.already_completed == 0 and not result.resume_state_cleared
+    assert (tmp_path / "pages/123/source.txt").read_bytes() == original_source
+    assert (tmp_path / "pages/456/page.json").exists()
+    assert "test-page" in (tmp_path / ".state/errors.jsonl").read_text()
+    assert ArchiveManifestStore(tmp_path).load().last_full_backup_at is None
+    progress.page_failed.assert_called_once()
+
+    client.validate_page_identity.side_effect = None
+    client.fetch_page.reset_mock()
+    result = backup_site(client, tmp_path, options=BackupOptions())
+    assert result.already_completed == 2 and result.resume_state_cleared
+    client.fetch_page.assert_not_called()
 
 
 def test_revision_failure_never_completes_component(client, tmp_path):
